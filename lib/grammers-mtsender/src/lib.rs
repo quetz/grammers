@@ -362,10 +362,15 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
             };
 
             match res {
-                Ok(ok) => break Ok(ok),
+                Ok(ok) => {
+                    log::info!("returning {} updates", ok.len());
+                    break Ok(ok);
+                }
                 Err(err) => {
                     match err {
-                        ReadError::Io(_) => {}
+                        ReadError::Io(code) => {
+                            log::info!("read error: {}", code);
+                        }
                         _ => {
                             log::warn!("unhandled error: {}", &err);
                             break Err(err);
