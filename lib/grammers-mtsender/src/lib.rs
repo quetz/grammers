@@ -666,6 +666,7 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
         self.transport.reset();
         self.mtp.reset();
         self.read_buffer.clear();
+        self.read_buffer.fill_remaining();
         self.write_index = 0;
         self.write_buffer.clear();
         self.requests

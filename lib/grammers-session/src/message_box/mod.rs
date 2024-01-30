@@ -378,6 +378,7 @@ impl MessageBox {
                 Err(Gap)
             } else {
                 info!("received an update referencing an unknown peer, but cannot find out who");
+                info!("update in question is: {:?}", updates);
                 Ok(())
             }
         }
