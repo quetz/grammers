@@ -320,7 +320,9 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
             //
             // The `request_rx.recv()` can't return `None` because we're holding a `tx`.
             trace!(
-                "reading bytes and sending up to {} bytes via network",
+                "reading bytes at buffer pos {}/{} and sending up to {} bytes via network",
+                self.read_index,
+                self.read_buffer.len(),
                 write_len
             );
 
@@ -477,6 +479,7 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
     ///
     /// This won't cause `ReadError::Io`, but yet another enum would be overkill.
     fn on_net_read(&mut self, n: usize) -> Result<Vec<tl::enums::Updates>, ReadError> {
+        trace!("on_net_read {} bytes", n);
         if n == 0 {
             return Err(ReadError::Io(io::Error::new(
                 io::ErrorKind::ConnectionReset,
