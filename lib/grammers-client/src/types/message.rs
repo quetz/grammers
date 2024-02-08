@@ -32,13 +32,13 @@ pub struct Message {
     // Using `enum` just for that would clutter all methods with `match`, so instead service
     // messages are interpreted as messages and their action stored separatedly.
     pub msg: tl::types::Message,
-    pub(crate) action: Option<tl::enums::MessageAction>,
-    pub(crate) client: Client,
+    pub action: Option<tl::enums::MessageAction>,
+    pub client: Client,
     // When fetching messages or receiving updates, a set of chats will be present. A single
     // server response contains a lot of chats, and some might be related to deep layers of
     // a message action for instance. Keeping the entire set like this allows for cheaper clones
     // and moves, and saves us from worrying about picking out all the chats we care about.
-    pub(crate) chats: Arc<types::ChatMap>,
+    pub chats: Arc<types::ChatMap>,
 }
 
 impl Message {

@@ -37,8 +37,8 @@ async fn async_main() -> Result<()> {
         .init()
         .unwrap();
 
-    let api_id = env!("TG_ID").parse().expect("TG_ID invalid");
-    let api_hash = env!("TG_HASH").to_string();
+    let api_id = std::env::var("TG_ID")?.parse().expect("TG_ID invalid");
+    let api_hash = std::env::var("TG_HASH")?.to_string();
     let chat_name = env::args().skip(1).next().expect("chat name missing");
 
     println!("Connecting to Telegram...");

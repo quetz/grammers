@@ -5,7 +5,7 @@
 // <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
-use super::{Deserialization, DeserializeError, Mtp};
+use super::{ContainerInfo, Deserialization, DeserializeError, Mtp};
 use crate::MsgId;
 use grammers_crypto::RingBuffer;
 use grammers_tl_types::{Cursor, Deserializable, Serializable};
@@ -63,7 +63,9 @@ impl Mtp for Plain {
         Some(MsgId(0))
     }
 
-    fn finalize(&mut self, _buffer: &mut RingBuffer<u8>) {}
+    fn finalize(&mut self, _buffer: &mut RingBuffer<u8>) -> Option<ContainerInfo> {
+        None
+    }
 
     /// Validates that the returned data is a correct plain message, and
     /// if it is, the method returns the inner contents of the message.

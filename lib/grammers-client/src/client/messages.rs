@@ -210,6 +210,16 @@ impl MessageIter {
         self
     }
 
+    pub fn max_id(mut self, max_id: i32) -> Self {
+        self.request.max_id = max_id;
+        self
+    }
+
+    pub fn min_id(mut self, min_id: i32) -> Self {
+        self.request.min_id = min_id;
+        self
+    }
+
     /// Determines how many messages there are in total.
     ///
     /// This only performs a network call if `next` has not been called before.
@@ -267,6 +277,16 @@ impl SearchIter {
                 hash: 0,
             },
         )
+    }
+
+    pub fn max_id(mut self, max_id: i32) -> Self {
+        self.request.max_id = max_id;
+        self
+    }
+
+    pub fn min_id(mut self, min_id: i32) -> Self {
+        self.request.min_id = min_id;
+        self
     }
 
     pub fn offset_id(mut self, offset: i32) -> Self {

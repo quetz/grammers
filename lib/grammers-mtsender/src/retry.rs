@@ -11,7 +11,7 @@ use std::time::Duration;
 ///
 /// note that this will return a `ControlFlow<(), Duration>` which tells the handler either `Break` the Connection Attempt *or*
 /// `Continue` After the Given `Duration`
-pub trait ReconnectionPolicy: Send + Sync {
+pub trait RetryPolicy: Send + Sync {
     ///this function will indicate that the handler should attempt for a new *reconnection* or not.
     ///
     /// it accepts a `attempts` which is the amount of reconnection tries that has been made already
@@ -19,15 +19,21 @@ pub trait ReconnectionPolicy: Send + Sync {
 }
 
 /// the default implementation of the **ReconnectionPolicy**.
-pub struct NoReconnect;
+pub struct NoRetry;
 
 /// simple *Fixed* sized implementation for the **ReconnectionPolicy** trait.
-pub struct FixedReconnect {
+pub struct Fixed {
     pub attempts: usize,
     pub delay: Duration,
 }
 
-impl ReconnectionPolicy for FixedReconnect {
+impl Fixed {
+    pub fn new(attempts: usize, delay: Duration) -> Self {
+        Self { attempts, delay }
+    }
+}
+
+impl RetryPolicy for Fixed {
     fn should_retry(&self, attempts: usize) -> ControlFlow<(), Duration> {
         if attempts <= self.attempts {
             ControlFlow::Continue(self.delay)
@@ -37,16 +43,8 @@ impl ReconnectionPolicy for FixedReconnect {
     }
 }
 
-impl ReconnectionPolicy for NoReconnect {
+impl RetryPolicy for NoRetry {
     fn should_retry(&self, _: usize) -> ControlFlow<(), Duration> {
         ControlFlow::Break(())
     }
 }
-
-unsafe impl Send for NoReconnect {}
-
-unsafe impl Sync for NoReconnect {}
-
-unsafe impl Send for FixedReconnect {}
-
-unsafe impl Sync for FixedReconnect {}

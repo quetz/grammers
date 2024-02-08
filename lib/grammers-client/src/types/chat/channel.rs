@@ -97,7 +97,7 @@ impl Channel {
     }
 
     #[cfg(not(feature = "unstable_raw"))]
-    pub(crate) fn from_raw(chat: tl::enums::Chat) -> Self {
+    pub fn from_raw(chat: tl::enums::Chat) -> Self {
         Self::_from_raw(chat)
     }
 

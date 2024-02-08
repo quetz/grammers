@@ -5,12 +5,12 @@
 // <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
-use super::{Deserialization, DeserializeError, Mtp, RequestError};
+use super::{ContainerInfo, Deserialization, DeserializeError, Mtp, RequestError};
 use crate::{manual_tl, MsgId};
 use getrandom::getrandom;
 use grammers_crypto::{decrypt_data_v2, encrypt_data_v2, AuthKey, RingBuffer};
 use grammers_tl_types::{self as tl, Cursor, Deserializable, Identifiable, Serializable};
-use log::info;
+use log::{debug, info};
 use std::mem;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
@@ -96,8 +96,8 @@ pub struct Encrypted {
     /// Temporary updates that came in a response.
     updates: Vec<Vec<u8>>,
 
-    /// How many messages are there in the buffer.
-    msg_count: usize,
+    /// What MsgIds are in the buffer.
+    msgs: Vec<MsgId>,
 }
 
 impl Builder {
@@ -141,7 +141,7 @@ impl Builder {
             compression_threshold: self.compression_threshold,
             rpc_results: Vec::new(),
             updates: Vec::new(),
-            msg_count: 0,
+            msgs: Vec::new(),
         }
     }
 }
@@ -180,7 +180,7 @@ impl Encrypted {
             .expect("system time is before epoch");
 
         let seconds = (now.as_secs() as i32 + self.time_offset) as u64;
-        let nanoseconds = now.subsec_nanos() as u64;
+        let nanoseconds = (now.subsec_nanos() >> 2) as u64;
         let mut new_msg_id = ((seconds << 32) | (nanoseconds << 2)) as i64;
 
         if self.last_msg_id >= new_msg_id {
@@ -215,32 +215,44 @@ impl Encrypted {
         (body.len() as i32).serialize(buffer);
         buffer.extend(body);
 
-        self.msg_count += 1;
+        self.msgs.push(MsgId(msg_id));
         MsgId(msg_id)
     }
 
     /// `finalize`, but without encryption.
     ///
     /// The buffer is *not* cleared, but is instead returned.
-    fn finalize_plain(&mut self, buffer: &mut RingBuffer<u8>) {
-        if self.msg_count == 0 {
-            return;
+    fn finalize_plain(&mut self, buffer: &mut RingBuffer<u8>) -> Option<ContainerInfo> {
+        if self.msgs.is_empty() {
+            return None;
         }
 
-        if self.msg_count != 1 {
+        let mut res = None;
+
+        if self.msgs.len() != 1 {
             // Prepend a container, setting its message ID and sequence number.
             // + 8 because it has to include the constructor ID and length (4 bytes each).
             let len = (buffer.len() + 8) as i32;
             let mut header = buffer.shift(MESSAGE_CONTAINER_HEADER_LEN);
 
             // Manually `serialize_msg` because the container body was already written.
-            self.get_new_msg_id().serialize(&mut header);
+            let container_id = self.get_new_msg_id();
+            debug!(
+                "serializing container with {} msgs ({:?}) with ID {}",
+                self.msgs.len(),
+                self.msgs,
+                container_id
+            );
+            container_id.serialize(&mut header);
             self.get_seq_no(false).serialize(&mut header);
 
             len.serialize(&mut header);
 
             manual_tl::MessageContainer::CONSTRUCTOR_ID.serialize(&mut header);
-            (self.msg_count as i32).serialize(&mut header);
+            (self.msgs.len() as i32).serialize(&mut header);
+
+            // TODO: replace with mem::take
+            res = Some((MsgId(container_id), self.msgs.clone()));
         }
 
         {
@@ -255,7 +267,8 @@ impl Encrypted {
             self.client_id.serialize(&mut header); // 8 bytes
         }
 
-        self.msg_count = 0;
+        self.msgs.clear();
+        res
     }
 
     fn process_message(&mut self, message: manual_tl::Message) -> Result<(), DeserializeError> {
@@ -1165,7 +1178,7 @@ impl Mtp for Encrypted {
         }
 
         // Serialize `MAXIMUM_LENGTH` requests at most.
-        if self.msg_count == manual_tl::MessageContainer::MAXIMUM_LENGTH {
+        if self.msgs.len() == manual_tl::MessageContainer::MAXIMUM_LENGTH {
             return None;
         }
 
@@ -1202,11 +1215,12 @@ impl Mtp for Encrypted {
         Some(self.serialize_msg(buffer, body, true))
     }
 
-    fn finalize(&mut self, buffer: &mut RingBuffer<u8>) {
-        self.finalize_plain(buffer);
+    fn finalize(&mut self, buffer: &mut RingBuffer<u8>) -> Option<ContainerInfo> {
+        let r = self.finalize_plain(buffer);
         if !buffer.is_empty() {
             encrypt_data_v2(buffer, &self.auth_key);
         }
+        r
     }
 
     /// Processes an encrypted response from the server.
@@ -1242,7 +1256,7 @@ impl Mtp for Encrypted {
         self.sequence = 0;
         self.last_msg_id = 0;
         self.pending_ack.clear();
-        self.msg_count = 0;
+        self.msgs.clear();
     }
 }
 

@@ -288,6 +288,9 @@ impl From<tl::deserialize::Error> for RequestError {
     }
 }
 
+// Container message ID along with contained message IDs
+type ContainerInfo = (MsgId, Vec<MsgId>);
+
 /// The trait used by the [Mobile Transport Protocol] to serialize outgoing
 /// messages and deserialize incoming ones into proper responses.
 ///
@@ -321,7 +324,7 @@ pub trait Mtp {
     /// produce data that has to be sent after deserializing incoming messages.
     ///
     /// The buffer may remain empty if there are no actions to take.
-    fn finalize(&mut self, buffer: &mut RingBuffer<u8>);
+    fn finalize(&mut self, buffer: &mut RingBuffer<u8>) -> Option<ContainerInfo>;
 
     /// Deserializes a single incoming message payload into zero or more responses.
     fn deserialize(&mut self, payload: &[u8]) -> Result<Deserialization, DeserializeError>;

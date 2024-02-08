@@ -12,6 +12,7 @@ use crate::Client;
 use futures_util::stream::{FuturesUnordered, StreamExt as _};
 use grammers_mtsender::InvocationError;
 use grammers_tl_types as tl;
+use log::info;
 use std::{io::SeekFrom, path::Path, sync::Arc};
 use tokio::sync::mpsc::unbounded_channel;
 use tokio::{
@@ -25,11 +26,13 @@ pub const MAX_CHUNK_SIZE: i32 = 512 * 1024;
 const FILE_MIGRATE_ERROR: i32 = 303;
 const BIG_FILE_SIZE: usize = 10 * 1024 * 1024;
 const WORKER_COUNT: usize = 4;
+const SLEEP_BEFORE_RETRY: u64 = 10;
 
 pub struct DownloadIter {
     client: Client,
     done: bool,
     request: tl::functions::upload::GetFile,
+    retries: usize,
 }
 
 impl DownloadIter {
@@ -54,7 +57,13 @@ impl DownloadIter {
                 offset: 0,
                 limit: MAX_CHUNK_SIZE,
             },
+            retries: 0,
         }
+    }
+
+    pub fn with_retries(mut self, retries: usize) -> Self {
+        self.retries = retries;
+        self
     }
 
     /// Changes the chunk size, in bytes, used to make requests. Useful if you only need to get a
@@ -113,7 +122,19 @@ impl DownloadIter {
                     dc = err.value;
                     continue;
                 }
-                Err(e) => Err(e),
+                Err(e) => {
+                    if self.retries > 0 {
+                        info!(
+                            "error while downloading but {} retries left: {}",
+                            self.retries, e
+                        );
+                        self.retries -= 1;
+                        tokio::time::sleep(std::time::Duration::from_secs(SLEEP_BEFORE_RETRY))
+                            .await;
+                        continue;
+                    }
+                    Err(e)
+                }
             };
         }
     }

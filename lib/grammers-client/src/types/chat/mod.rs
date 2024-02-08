@@ -37,11 +37,11 @@ pub enum Chat {
 }
 
 impl Chat {
-    pub(crate) fn from_user(user: tl::enums::User) -> Self {
+    pub fn from_user(user: tl::enums::User) -> Self {
         Self::User(User::from_raw(user))
     }
 
-    pub(crate) fn from_chat(chat: tl::enums::Chat) -> Self {
+    pub fn from_chat(chat: tl::enums::Chat) -> Self {
         use tl::enums::Chat as C;
 
         match chat {

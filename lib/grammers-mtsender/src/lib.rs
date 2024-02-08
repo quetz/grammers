@@ -6,9 +6,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 mod errors;
-mod reconnection;
+pub mod retry;
 
-pub use crate::reconnection::*;
 pub use errors::{AuthorizationError, InvocationError, ReadError};
 use futures_util::future::{pending, select, Either};
 use grammers_crypto::RingBuffer;
@@ -17,6 +16,7 @@ use grammers_mtproto::transport::{self, Transport};
 use grammers_mtproto::{authentication, MsgId};
 use grammers_tl_types::{self as tl, Deserializable, RemoteCall};
 use log::{debug, info, trace, warn};
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::io::Error;
 use std::ops::ControlFlow;
@@ -116,8 +116,14 @@ pub struct Sender<T: Transport, M: Mtp> {
     proxy_url: Option<String>,
     requests: Vec<Request>,
     request_rx: mpsc::UnboundedReceiver<Request>,
+
+    // If messages are serialized to container (on MTP level)
+    // we need to track both container ID and messages it contains
+    // to property re-send them on BadMessage(container_id)
+    containers: HashMap<MsgId, HashSet<MsgId>>,
+
     next_ping: Instant,
-    reconnection_policy: &'static dyn ReconnectionPolicy,
+    reconnection_policy: &'static dyn retry::RetryPolicy,
 
     // Transport-level buffers and positions
     read_buffer: RingBuffer<u8>,
@@ -132,6 +138,7 @@ struct Request {
     result: oneshot::Sender<Result<Vec<u8>, InvocationError>>,
 }
 
+#[derive(Debug)]
 enum RequestState {
     NotSerialized,
     Serialized(MsgId),
@@ -172,7 +179,7 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
         transport: T,
         mtp: M,
         addr: std::net::SocketAddr,
-        reconnection_policy: &'static dyn ReconnectionPolicy,
+        reconnection_policy: &'static dyn retry::RetryPolicy,
     ) -> Result<(Self, Enqueuer), io::Error> {
         let stream = connect_stream(&addr).await?;
         let (tx, rx) = mpsc::unbounded_channel();
@@ -188,6 +195,9 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
                 proxy_url: None,
                 requests: vec![],
                 request_rx: rx,
+
+                containers: HashMap::new(),
+
                 next_ping: Instant::now() + PING_DELAY,
                 reconnection_policy,
 
@@ -206,7 +216,7 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
         mtp: M,
         addr: SocketAddr,
         proxy_url: &str,
-        reconnection_policy: &'static dyn ReconnectionPolicy,
+        reconnection_policy: &'static dyn RetryPolicy,
     ) -> Result<(Self, Enqueuer), io::Error> {
         info!("connecting...");
 
@@ -365,7 +375,6 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
 
             match res {
                 Ok(ok) => {
-                    log::info!("returning {} updates", ok.len());
                     break Ok(ok);
                 }
                 Err(err) => {
@@ -469,7 +478,10 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
             }
         }
 
-        self.mtp.finalize(&mut self.write_buffer);
+        if let Some((container_id, msgs)) = self.mtp.finalize(&mut self.write_buffer) {
+            self.containers
+                .insert(container_id, HashSet::from_iter(msgs.into_iter()));
+        }
         if !self.write_buffer.is_empty() {
             self.transport.pack(&mut self.write_buffer)
         }
@@ -602,15 +614,34 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
 
         for (msg_id, ret) in result.rpc_results {
             let mut found = false;
+
+            let msg_ids = if let Some(msg_ids) = self.containers.remove(&msg_id) {
+                msg_ids
+            } else {
+                let msg_ids = HashSet::from_iter([msg_id].into_iter());
+                debug!(
+                    "got rpc result for container {:?} with messages {:?}",
+                    msg_id, msg_ids
+                );
+                msg_ids
+            };
+
+            // remove msg_id from containers, and remove empty containers after that
+            self.containers.retain(|_, v| {
+                v.remove(&msg_id);
+                !v.is_empty()
+            });
+
             for i in (0..self.requests.len()).rev() {
                 let req = &mut self.requests[i];
                 match req.state {
-                    RequestState::Serialized(sid) if sid == msg_id => {
+                    RequestState::Serialized(sid) if msg_ids.contains(&sid) => {
                         panic!("got rpc result {:?} for unsent request {:?}", msg_id, sid);
                     }
-                    RequestState::Sent(sid) if sid == msg_id => {
+
+                    RequestState::Sent(sid) if msg_ids.contains(&sid) => {
                         found = true;
-                        let result = match ret {
+                        let result = match ret.clone() {
                             Ok(x) => {
                                 assert!(x.len() >= 4);
                                 let res_id = u32::from_le_bytes([x[0], x[1], x[2], x[3]]);
@@ -623,14 +654,14 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
                                 Ok(x)
                             }
                             Err(mtp::RequestError::RpcError(mut error)) => {
-                                debug!("got rpc error {:?} for request {:?}", error, msg_id);
+                                debug!("got rpc error {:?} for request {:?}", error, sid);
                                 let x = req.body.as_slice();
                                 error.caused_by =
                                     Some(u32::from_le_bytes([x[0], x[1], x[2], x[3]]));
                                 Err(InvocationError::Rpc(error))
                             }
                             Err(mtp::RequestError::Dropped) => {
-                                debug!("response for request {:?} dropped", msg_id);
+                                debug!("response for request {:?} dropped", sid);
                                 Err(InvocationError::Dropped)
                             }
                             Err(mtp::RequestError::Deserialize(error)) => {
@@ -642,12 +673,13 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
                             }
                             Err(err @ mtp::RequestError::BadMessage { .. }) => {
                                 // TODO add a test to make sure we resend the request
-                                info!("{}; re-sending request {:?}", err, msg_id);
+                                info!("{}; re-sending request {:?}", err, sid);
                                 req.state = RequestState::NotSerialized;
                                 break;
                             }
                         };
 
+                        debug!("removing request {:?}", self.requests[i].state);
                         let req = self.requests.remove(i);
                         drop(req.result.send(result));
                         break;
@@ -657,7 +689,14 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
             }
 
             if !found {
-                info!("got rpc result {:?} but no such request is saved", msg_id);
+                info!(
+                    "got rpc result {:?} but no such request is saved: {:?}",
+                    msg_id, &ret
+                );
+                info!("message queue has {} requests:", self.requests.len());
+                for req in &self.requests {
+                    info!("  {:?}", req.state);
+                }
             }
         }
     }
@@ -665,6 +704,7 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
     fn reset_state(&mut self) {
         self.transport.reset();
         self.mtp.reset();
+        self.read_index = 0;
         self.read_buffer.clear();
         self.read_buffer.fill_remaining();
         self.write_index = 0;
@@ -684,7 +724,7 @@ impl<T: Transport> Sender<T, mtp::Encrypted> {
 pub async fn connect<T: Transport>(
     transport: T,
     addr: std::net::SocketAddr,
-    rc_policy: &'static dyn ReconnectionPolicy,
+    rc_policy: &'static dyn retry::RetryPolicy,
 ) -> Result<(Sender<T, mtp::Encrypted>, Enqueuer), AuthorizationError> {
     let (sender, enqueuer) = Sender::connect(transport, mtp::Plain::new(), addr, rc_policy).await?;
     generate_auth_key(sender, enqueuer).await
@@ -695,7 +735,7 @@ pub async fn connect_via_proxy<'a, T: Transport>(
     transport: T,
     addr: std::net::SocketAddr,
     proxy_url: &str,
-    rc_policy: &'static dyn ReconnectionPolicy,
+    rc_policy: &'static dyn RetryPolicy,
 ) -> Result<(Sender<T, mtp::Encrypted>, Enqueuer), AuthorizationError> {
     let (sender, enqueuer) =
         Sender::connect_via_proxy(transport, mtp::Plain::new(), addr, proxy_url, rc_policy).await?;
@@ -798,6 +838,7 @@ pub async fn generate_auth_key<T: Transport>(
                 .finish(auth_key),
             requests: sender.requests,
             request_rx: sender.request_rx,
+            containers: sender.containers,
             next_ping: Instant::now() + PING_DELAY,
             read_buffer: sender.read_buffer,
             read_index: sender.read_index,
@@ -816,7 +857,7 @@ pub async fn connect_with_auth<T: Transport>(
     transport: T,
     addr: std::net::SocketAddr,
     auth_key: [u8; 256],
-    rc_policy: &'static dyn ReconnectionPolicy,
+    rc_policy: &'static dyn retry::RetryPolicy,
 ) -> Result<(Sender<T, mtp::Encrypted>, Enqueuer), io::Error> {
     Sender::connect(
         transport,
@@ -833,7 +874,7 @@ pub async fn connect_via_proxy_with_auth<'a, T: Transport>(
     addr: std::net::SocketAddr,
     auth_key: [u8; 256],
     proxy_url: &str,
-    rc_policy: &'static dyn ReconnectionPolicy,
+    rc_policy: &'static dyn RetryPolicy,
 ) -> Result<(Sender<T, mtp::Encrypted>, Enqueuer), io::Error> {
     Sender::connect_via_proxy(
         transport,

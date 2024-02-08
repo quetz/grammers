@@ -1,7 +1,7 @@
 //! this example demonstrate how to implement custom Reconnection Polies
 
 use grammers_client::{Client, Config, InitParams};
-use grammers_mtsender::ReconnectionPolicy;
+use grammers_mtsender::retry::RetryPolicy;
 use grammers_session::Session;
 use std::ops::ControlFlow;
 use std::time::Duration;
@@ -12,7 +12,7 @@ type Result = std::result::Result<(), Box<dyn std::error::Error>>;
 /// note that this can contain any value you need, in this case, its empty
 struct MyPolicy;
 
-impl ReconnectionPolicy for MyPolicy {
+impl RetryPolicy for MyPolicy {
     ///this is the only function you need to implement,
     /// it gives you the attempted reconnections, and `self` in case you have any data in your struct.
     /// you should return a [`ControlFlow`] which can be either `Break` or `Continue`, break will **NOT** attempt a reconnection,

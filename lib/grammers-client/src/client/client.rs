@@ -6,7 +6,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 use grammers_mtproto::{mtp, transport};
-use grammers_mtsender::{self as sender, ReconnectionPolicy, Sender};
+use grammers_mtsender::{self as sender, retry, Sender};
 use grammers_session::{ChatHashCache, MessageBox, Session};
 use sender::Enqueuer;
 use std::collections::{HashMap, VecDeque};
@@ -116,7 +116,7 @@ pub struct InitParams {
     /// [`NoReconnect`]: grammers_mtsender::NoReconnect
     /// [`FixedReconnect`]: grammers_mtsender::FixedReconnect
     /// [`ReconnectionPolicy`]: grammers_mtsender::ReconnectionPolicy
-    pub reconnection_policy: &'static dyn ReconnectionPolicy,
+    pub reconnection_policy: &'static dyn retry::RetryPolicy,
 }
 
 pub(crate) struct ClientInner {
@@ -190,7 +190,7 @@ impl Default for InitParams {
             update_queue_limit: Some(100),
             #[cfg(feature = "proxy")]
             proxy_url: None,
-            reconnection_policy: &grammers_mtsender::NoReconnect,
+            reconnection_policy: &grammers_mtsender::retry::NoRetry,
         }
     }
 }
