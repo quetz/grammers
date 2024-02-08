@@ -95,13 +95,18 @@ impl DownloadIter {
 
         use tl::enums::upload::File;
 
+        let policy = self.client.0.config.params.retry_policy;
+
         // TODO handle maybe FILEREF_UPGRADE_NEEDED
         let mut dc: Option<u32> = None;
         loop {
-            let result = match dc.take() {
-                None => self.client.invoke(&self.request).await,
-                Some(dc) => self.client.invoke_in_dc(&self.request, dc as i32).await,
-            };
+            let result = grammers_mtsender::retrying!(
+                policy,
+                match dc.take() {
+                    None => self.client.invoke(&self.request).await,
+                    Some(dc) => self.client.invoke_in_dc(&self.request, dc as i32).await,
+                }
+            );
 
             break match result {
                 Ok(File::File(f)) => {
@@ -239,6 +244,8 @@ impl Client {
         file.set_len(size as u64).await?;
         file.seek(SeekFrom::Start(0)).await?;
 
+        let policy = self.0.config.params.retry_policy;
+
         // Start workers
         let (tx, mut rx) = unbounded_channel();
         let part_index = Arc::new(tokio::sync::Mutex::new(0));
@@ -248,6 +255,7 @@ impl Client {
             let tx = tx.clone();
             let part_index = part_index.clone();
             let client = self.clone();
+
             let task = tokio::task::spawn(async move {
                 let mut retry_offset = None;
                 let mut dc = None;
@@ -274,10 +282,15 @@ impl Client {
                         offset,
                         limit: MAX_CHUNK_SIZE,
                     };
-                    let res = match dc {
-                        None => client.invoke(request).await,
-                        Some(dc) => client.invoke_in_dc(request, dc as i32).await,
-                    };
+
+                    let res = grammers_mtsender::retrying!(
+                        policy,
+                        match dc {
+                            None => client.invoke(request).await,
+                            Some(dc) => client.invoke_in_dc(request, dc as i32).await,
+                        }
+                    );
+
                     match res {
                         Ok(tl::enums::upload::File::File(file)) => {
                             tx.send((offset as u64, file.bytes)).unwrap();

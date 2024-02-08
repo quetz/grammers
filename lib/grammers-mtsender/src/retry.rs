@@ -28,7 +28,7 @@ pub struct Fixed {
 }
 
 impl Fixed {
-    pub fn new(attempts: usize, delay: Duration) -> Self {
+    pub const fn new(attempts: usize, delay: Duration) -> Self {
         Self { attempts, delay }
     }
 }
@@ -47,4 +47,25 @@ impl RetryPolicy for NoRetry {
     fn should_retry(&self, _: usize) -> ControlFlow<(), Duration> {
         ControlFlow::Break(())
     }
+}
+
+#[macro_export]
+macro_rules! retrying {
+    ($policy:expr, $body:expr) => {{
+        let mut attempts = 0;
+        loop {
+            let res = $body;
+            attempts += 1;
+            match res {
+                Ok(value) => break Ok(value),
+                Err(_) => match $policy.should_retry(attempts) {
+                    std::ops::ControlFlow::Continue(timeout) => {
+                        tokio::time::sleep(timeout).await;
+                        continue;
+                    }
+                    std::ops::ControlFlow::Break(_) => break res,
+                },
+            }
+        }
+    }};
 }

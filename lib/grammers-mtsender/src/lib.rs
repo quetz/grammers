@@ -123,7 +123,7 @@ pub struct Sender<T: Transport, M: Mtp> {
     containers: HashMap<MsgId, HashSet<MsgId>>,
 
     next_ping: Instant,
-    reconnection_policy: &'static dyn retry::RetryPolicy,
+    retry_policy: &'static dyn retry::RetryPolicy,
 
     // Transport-level buffers and positions
     read_buffer: RingBuffer<u8>,
@@ -199,7 +199,7 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
                 containers: HashMap::new(),
 
                 next_ping: Instant::now() + PING_DELAY,
-                reconnection_policy,
+                retry_policy: reconnection_policy,
 
                 read_buffer,
                 read_index: 0,
@@ -425,7 +425,7 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
 
                     attempts += 1;
 
-                    match self.reconnection_policy.should_retry(attempts) {
+                    match self.retry_policy.should_retry(attempts) {
                         ControlFlow::Break(_) => {
                             log::error!(
                                 "attempted more than {} times for reconnection and failed",
@@ -713,6 +713,10 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
             .iter_mut()
             .for_each(|r| r.state = RequestState::NotSerialized);
     }
+
+    pub fn retry_policy(&self) -> &'static dyn retry::RetryPolicy {
+        self.retry_policy
+    }
 }
 
 impl<T: Transport> Sender<T, mtp::Encrypted> {
@@ -847,7 +851,7 @@ pub async fn generate_auth_key<T: Transport>(
             addr: sender.addr,
             #[cfg(feature = "proxy")]
             proxy_url: sender.proxy_url,
-            reconnection_policy: sender.reconnection_policy,
+            retry_policy: sender.retry_policy,
         },
         enqueuer,
     ))
