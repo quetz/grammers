@@ -11,6 +11,7 @@ use crate::types::{IterBuffer, Message};
 use crate::utils::{generate_random_id, generate_random_ids};
 use crate::{types, ChatMap, Client};
 use chrono::{DateTime, FixedOffset};
+use grammers_mtsender::retrying;
 pub use grammers_mtsender::{AuthorizationError, InvocationError};
 use grammers_session::PackedChat;
 use grammers_tl_types as tl;
@@ -106,7 +107,6 @@ pub(crate) fn parse_mention_entities(
 }
 
 const MAX_LIMIT: usize = 100;
-
 impl<R: tl::RemoteCall<Return = tl::enums::messages::Messages>> IterBuffer<R, Message> {
     /// Fetches the total unless cached.
     ///
@@ -134,32 +134,37 @@ impl<R: tl::RemoteCall<Return = tl::enums::messages::Messages>> IterBuffer<R, Me
     async fn fill_buffer(&mut self, limit: i32) -> Result<Option<i32>, InvocationError> {
         use tl::enums::messages::Messages;
 
-        let (messages, users, chats, rate) = match self.client.invoke(&self.request).await? {
-            Messages::Messages(m) => {
-                self.last_chunk = true;
-                self.total = Some(m.messages.len());
-                (m.messages, m.users, m.chats, None)
-            }
-            Messages::Slice(m) => {
-                // Can't rely on `count(messages) < limit` as the stop condition.
-                // See https://github.com/LonamiWebs/Telethon/issues/3949 for more.
-                //
-                // If the highest fetched message ID is lower than or equal to the limit,
-                // there can't be more messages after (highest ID - limit), because the
-                // absolute lowest message ID is 1.
-                self.last_chunk = m.messages.is_empty() || get_message_id(&m.messages[0]) <= limit;
-                self.total = Some(m.count as usize);
-                (m.messages, m.users, m.chats, m.next_rate)
-            }
-            Messages::ChannelMessages(m) => {
-                self.last_chunk = m.messages.is_empty() || get_message_id(&m.messages[0]) <= limit;
-                self.total = Some(m.count as usize);
-                (m.messages, m.users, m.chats, None)
-            }
-            Messages::NotModified(_) => {
-                panic!("API returned Messages::NotModified even though hash = 0")
-            }
-        };
+        let policy = self.client.0.config.params.retry_policy;
+
+        let (messages, users, chats, rate) =
+            match retrying!(policy, self.client.invoke(&self.request).await)? {
+                Messages::Messages(m) => {
+                    self.last_chunk = true;
+                    self.total = Some(m.messages.len());
+                    (m.messages, m.users, m.chats, None)
+                }
+                Messages::Slice(m) => {
+                    // Can't rely on `count(messages) < limit` as the stop condition.
+                    // See https://github.com/LonamiWebs/Telethon/issues/3949 for more.
+                    //
+                    // If the highest fetched message ID is lower than or equal to the limit,
+                    // there can't be more messages after (highest ID - limit), because the
+                    // absolute lowest message ID is 1.
+                    self.last_chunk =
+                        m.messages.is_empty() || get_message_id(&m.messages[0]) <= limit;
+                    self.total = Some(m.count as usize);
+                    (m.messages, m.users, m.chats, m.next_rate)
+                }
+                Messages::ChannelMessages(m) => {
+                    self.last_chunk =
+                        m.messages.is_empty() || get_message_id(&m.messages[0]) <= limit;
+                    self.total = Some(m.count as usize);
+                    (m.messages, m.users, m.chats, None)
+                }
+                Messages::NotModified(_) => {
+                    panic!("API returned Messages::NotModified even though hash = 0")
+                }
+            };
 
         {
             let mut state = self.client.0.state.write().unwrap();

@@ -57,8 +57,10 @@ macro_rules! retrying {
             let res = $body;
             attempts += 1;
             match res {
-                Ok(value) => break Ok(value),
-                Err(_) => match $policy.should_retry(attempts) {
+                Ok(value) => {
+                    break Ok(value);
+                }
+                Err(ref err) => match $policy.should_retry(attempts) {
                     std::ops::ControlFlow::Continue(timeout) => {
                         tokio::time::sleep(timeout).await;
                         continue;
@@ -68,4 +70,45 @@ macro_rules! retrying {
             }
         }
     }};
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Erroring {
+        cnt: usize,
+    }
+
+    impl Erroring {
+        fn new(cnt: usize) -> Self {
+            Self { cnt }
+        }
+
+        async fn run(&mut self) -> Result<usize, usize> {
+            if self.cnt > 0 {
+                self.cnt -= 1;
+                return Err(self.cnt);
+            }
+            Ok(self.cnt)
+        }
+    }
+
+    #[tokio::test]
+    async fn test_retrying_macro_ok() {
+        let policy = Fixed::new(10, Duration::new(0, 0));
+        let mut err = Erroring::new(5);
+
+        let r = retrying!(policy, err.run().await);
+        assert!(r.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_retrying_macro_err() {
+        let policy = Fixed::new(3, Duration::new(0, 0));
+        let mut err = Erroring::new(5);
+
+        let r = retrying!(policy, err.run().await);
+        assert!(r.is_err());
+    }
 }

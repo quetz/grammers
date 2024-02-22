@@ -31,3 +31,9 @@ pub const DEFAULT_COMPRESSION_THRESHOLD: Option<usize> = Some(512);
 /// you will know the response corresponds to it.
 #[derive(Copy, Clone, Debug, Hash, PartialEq, PartialOrd, Eq, Ord)]
 pub struct MsgId(i64);
+
+impl MsgId {
+    fn min(&self, other: Self) -> Self {
+        MsgId(i64::min(self.0, other.0))
+    }
+}

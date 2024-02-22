@@ -36,15 +36,15 @@ pub struct DownloadIter {
 }
 
 impl DownloadIter {
-    fn new(client: &Client, downloadable: &Downloadable) -> Self {
+    pub fn new(client: &Client, downloadable: &Downloadable) -> Self {
         DownloadIter::new_from_file_location(client, downloadable.to_input_location().unwrap())
     }
 
-    fn new_from_location(client: &Client, location: tl::enums::InputFileLocation) -> Self {
+    pub fn new_from_location(client: &Client, location: tl::enums::InputFileLocation) -> Self {
         DownloadIter::new_from_file_location(client, location)
     }
 
-    fn new_from_file_location(client: &Client, location: tl::enums::InputFileLocation) -> Self {
+    pub fn new_from_file_location(client: &Client, location: tl::enums::InputFileLocation) -> Self {
         // TODO let users tweak all the options from the request
         // TODO cdn support
         Self {

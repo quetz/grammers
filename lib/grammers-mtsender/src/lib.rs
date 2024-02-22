@@ -612,17 +612,19 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
             }
         }));
 
+        let mut resend_after = None;
+
         for (msg_id, ret) in result.rpc_results {
             let mut found = false;
 
             let msg_ids = if let Some(msg_ids) = self.containers.remove(&msg_id) {
-                msg_ids
-            } else {
-                let msg_ids = HashSet::from_iter([msg_id].into_iter());
                 debug!(
                     "got rpc result for container {:?} with messages {:?}",
                     msg_id, msg_ids
                 );
+                msg_ids
+            } else {
+                let msg_ids = HashSet::from_iter([msg_id].into_iter());
                 msg_ids
             };
 
@@ -671,10 +673,16 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
                                 );
                                 Err(InvocationError::Read(error.into()))
                             }
-                            Err(err @ mtp::RequestError::BadMessage { .. }) => {
+                            Err(ref err @ mtp::RequestError::BadMessage { code }) => {
                                 // TODO add a test to make sure we resend the request
                                 info!("{}; re-sending request {:?}", err, sid);
                                 req.state = RequestState::NotSerialized;
+
+                                if code == 48 {
+                                    // bad server salt. tdlib re-sends all requests that go after this one, so do we...
+                                    info!("re-sending all requests after {:?}", sid);
+                                    resend_after = Some(sid);
+                                }
                                 break;
                             }
                         };
@@ -688,7 +696,7 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
                 }
             }
 
-            if !found {
+            if !found && ret.is_err() {
                 info!(
                     "got rpc result {:?} but no such request is saved: {:?}",
                     msg_id, &ret
@@ -696,6 +704,19 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
                 info!("message queue has {} requests:", self.requests.len());
                 for req in &self.requests {
                     info!("  {:?}", req.state);
+                }
+            }
+        }
+
+        // do we need to re-send all request after certain id?
+        if let Some(resend_after) = resend_after {
+            for req in self.requests.iter_mut() {
+                match req.state {
+                    RequestState::Sent(sid) if sid > resend_after => {
+                        info!("re-sending request {:?}", sid);
+                        req.state = RequestState::NotSerialized;
+                    }
+                    _ => {}
                 }
             }
         }
