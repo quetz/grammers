@@ -390,7 +390,7 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
 
                     self.reset_state();
                     self.try_connect().await?;
-                    debug!("issuing getState to receive updates...");
+                    log::debug!("issuing getState to receive updates...");
 
                     drop(self.enqueue_body(tl::functions::updates::GetState {}.to_bytes()));
                 }
