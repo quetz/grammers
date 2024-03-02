@@ -383,6 +383,20 @@ impl Connection {
                 Ok(response) => match response {
                     Ok(body) => break R::Return::from_bytes(&body).map_err(|e| e.into()),
                     Err(InvocationError::Rpc(RpcError {
+                        name, code: 500, ..
+                    })) => {
+                        let delay = std::time::Duration::from_secs(5);
+                        info!(
+                            "sleeping on {} for {:?} before retrying {}",
+                            name,
+                            delay,
+                            std::any::type_name::<R>()
+                        );
+                        tokio::time::sleep(delay).await;
+                        rx = self.request_tx.read().unwrap().enqueue(request);
+                        continue;
+                    }
+                    Err(InvocationError::Rpc(RpcError {
                         name,
                         code: 420,
                         value: Some(seconds),

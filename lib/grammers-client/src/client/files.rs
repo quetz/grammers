@@ -95,18 +95,13 @@ impl DownloadIter {
 
         use tl::enums::upload::File;
 
-        let policy = self.client.0.config.params.retry_policy;
-
         // TODO handle maybe FILEREF_UPGRADE_NEEDED
         let mut dc: Option<u32> = None;
         loop {
-            let result = grammers_mtsender::retrying!(
-                policy,
-                match dc.take() {
-                    None => self.client.invoke(&self.request).await,
-                    Some(dc) => self.client.invoke_in_dc(&self.request, dc as i32).await,
-                }
-            );
+            let result = match dc.take() {
+                None => self.client.invoke(&self.request).await,
+                Some(dc) => self.client.invoke_in_dc(&self.request, dc as i32).await,
+            };
 
             break match result {
                 Ok(File::File(f)) => {
