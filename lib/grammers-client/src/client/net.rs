@@ -375,17 +375,27 @@ impl Connection {
         flood_sleep_threshold: u32,
         on_updates: F,
     ) -> Result<R::Return, InvocationError> {
-        let mut slept_flood = false;
+        const GENERIC_ERROR_TIMEOUT: Duration = Duration::from_secs(5);
+
+        let mut exp_backoff = 0;
 
         let mut rx = { self.request_tx.read().unwrap().enqueue(request) };
         loop {
             match rx.try_recv() {
                 Ok(response) => match response {
                     Ok(body) => break R::Return::from_bytes(&body).map_err(|e| e.into()),
+                    // we automagically retry on:
+                    //   500  - internal server error on tg side
+                    //   -503 - timedout
+                    //   420  - FLOOD_WAIT
                     Err(InvocationError::Rpc(RpcError {
-                        name, code: 500, ..
-                    })) => {
-                        let delay = std::time::Duration::from_secs(5);
+                        name, code, value, ..
+                    })) if code == 500 || code == -503 || code == 420 => {
+                        let delay = if code == 420 {
+                            value.unwrap_or(GENERIC_ERROR_TIMEOUT)
+                        } else {
+                            GENERIC_ERROR_TIMEOUT
+                        } * (1 << exp_backoff);
                         info!(
                             "sleeping on {} for {:?} before retrying {}",
                             name,
@@ -394,24 +404,8 @@ impl Connection {
                         );
                         tokio::time::sleep(delay).await;
                         rx = self.request_tx.read().unwrap().enqueue(request);
-                        continue;
-                    }
-                    Err(InvocationError::Rpc(RpcError {
-                        name,
-                        code: 420,
-                        value: Some(seconds),
-                        ..
-                    })) if !slept_flood && seconds <= flood_sleep_threshold => {
-                        let delay = std::time::Duration::from_secs(seconds as _);
-                        info!(
-                            "sleeping on {} for {:?} before retrying {}",
-                            name,
-                            delay,
-                            std::any::type_name::<R>()
-                        );
-                        tokio::time::sleep(delay).await;
-                        slept_flood = true;
-                        rx = self.request_tx.read().unwrap().enqueue(request);
+                        exp_backoff += 1;
+
                         continue;
                     }
                     Err(e) => break Err(e),
