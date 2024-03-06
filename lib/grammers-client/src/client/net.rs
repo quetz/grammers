@@ -19,6 +19,7 @@ use std::collections::{HashMap, VecDeque};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 use tokio::sync::oneshot::error::TryRecvError;
 use tokio::sync::{Mutex as AsyncMutex, RwLock as AsyncRwLock};
 
@@ -72,7 +73,8 @@ pub(crate) async fn connect_sender(
         }
 
         #[cfg(not(feature = "proxy"))]
-        sender::connect_with_auth(transport, addr, auth_key, config.params.retry_policy).await?
+        sender::connect_with_auth(transport, addr, auth_key, config.params.reconnection_policy)
+            .await?
     } else {
         info!(
             "creating a new sender and auth key in dc {} {:?}",
@@ -88,7 +90,8 @@ pub(crate) async fn connect_sender(
         };
 
         #[cfg(not(feature = "proxy"))]
-        let (sender, tx) = sender::connect(transport, addr, config.params.retry_policy).await?;
+        let (sender, tx) =
+            sender::connect(transport, addr, config.params.reconnection_policy).await?;
 
         config.session.insert_dc(dc_id, addr, sender.auth_key());
         (sender, tx)
@@ -375,7 +378,7 @@ impl Connection {
         flood_sleep_threshold: u32,
         on_updates: F,
     ) -> Result<R::Return, InvocationError> {
-        const GENERIC_ERROR_TIMEOUT: Duration = Duration::from_secs(5);
+        const GENERIC_ERROR_TIMEOUT: u64 = 5;
 
         let mut exp_backoff = 0;
 
@@ -392,7 +395,7 @@ impl Connection {
                         name, code, value, ..
                     })) if code == 500 || code == -503 || code == 420 => {
                         let delay = if code == 420 {
-                            value.unwrap_or(GENERIC_ERROR_TIMEOUT)
+                            value.map(|v| v as u64).unwrap_or(GENERIC_ERROR_TIMEOUT)
                         } else {
                             GENERIC_ERROR_TIMEOUT
                         } * (1 << exp_backoff);
@@ -402,7 +405,7 @@ impl Connection {
                             delay,
                             std::any::type_name::<R>()
                         );
-                        tokio::time::sleep(delay).await;
+                        tokio::time::sleep(Duration::from_secs(delay)).await;
                         rx = self.request_tx.read().unwrap().enqueue(request);
                         exp_backoff += 1;
 

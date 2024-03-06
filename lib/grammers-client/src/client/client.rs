@@ -113,10 +113,10 @@ pub struct InitParams {
     ///
     /// for more details refer to [`examples`](lib/grammers-client/examples/reconnection.rs)
     ///
-    /// [`NoReconnect`]: grammers_mtsender::NoReconnect
-    /// [`FixedReconnect`]: grammers_mtsender::FixedReconnect
-    /// [`ReconnectionPolicy`]: grammers_mtsender::ReconnectionPolicy
-    pub retry_policy: &'static dyn retry::RetryPolicy,
+    /// [`NoReconnect`]: grammers_mtsender::retry::NoReconnect
+    /// [`FixedReconnect`]: grammers_mtsender::retry::FixedReconnect
+    /// [`ReconnectionPolicy`]: grammers_mtsender::retry::RetryPolicy
+    pub reconnection_policy: &'static dyn retry::RetryPolicy,
 }
 
 pub(crate) struct ClientInner {
@@ -190,7 +190,7 @@ impl Default for InitParams {
             update_queue_limit: Some(100),
             #[cfg(feature = "proxy")]
             proxy_url: None,
-            retry_policy: &grammers_mtsender::retry::NoRetry,
+            reconnection_policy: &grammers_mtsender::retry::NoRetry,
         }
     }
 }

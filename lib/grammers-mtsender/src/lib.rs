@@ -123,7 +123,7 @@ pub struct Sender<T: Transport, M: Mtp> {
     containers: HashMap<MsgId, HashSet<MsgId>>,
 
     next_ping: Instant,
-    retry_policy: &'static dyn retry::RetryPolicy,
+    reconnection_policy: &'static dyn retry::RetryPolicy,
 
     // Transport-level buffers and positions
     read_buffer: RingBuffer<u8>,
@@ -199,7 +199,7 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
                 containers: HashMap::new(),
 
                 next_ping: Instant::now() + PING_DELAY,
-                retry_policy: reconnection_policy,
+                reconnection_policy,
 
                 read_buffer,
                 read_index: 0,
@@ -216,7 +216,7 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
         mtp: M,
         addr: SocketAddr,
         proxy_url: &str,
-        reconnection_policy: &'static dyn RetryPolicy,
+        reconnection_policy: &'static dyn retry::RetryPolicy,
     ) -> Result<(Self, Enqueuer), io::Error> {
         info!("connecting...");
 
@@ -235,6 +235,8 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
                 request_rx: rx,
                 next_ping: Instant::now() + PING_DELAY,
                 reconnection_policy,
+
+                containers: HashMap::new(),
 
                 read_buffer,
                 read_index: 0,
@@ -427,7 +429,7 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
 
                     attempts += 1;
 
-                    match self.retry_policy.should_retry(attempts) {
+                    match self.reconnection_policy.should_retry(attempts) {
                         ControlFlow::Break(_) => {
                             log::error!(
                                 "attempted more than {} times for reconnection and failed",
@@ -738,7 +740,7 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
     }
 
     pub fn retry_policy(&self) -> &'static dyn retry::RetryPolicy {
-        self.retry_policy
+        self.reconnection_policy
     }
 }
 
@@ -762,7 +764,7 @@ pub async fn connect_via_proxy<'a, T: Transport>(
     transport: T,
     addr: std::net::SocketAddr,
     proxy_url: &str,
-    rc_policy: &'static dyn RetryPolicy,
+    rc_policy: &'static dyn retry::RetryPolicy,
 ) -> Result<(Sender<T, mtp::Encrypted>, Enqueuer), AuthorizationError> {
     let (sender, enqueuer) =
         Sender::connect_via_proxy(transport, mtp::Plain::new(), addr, proxy_url, rc_policy).await?;
@@ -874,7 +876,7 @@ pub async fn generate_auth_key<T: Transport>(
             addr: sender.addr,
             #[cfg(feature = "proxy")]
             proxy_url: sender.proxy_url,
-            retry_policy: sender.retry_policy,
+            reconnection_policy: sender.reconnection_policy,
         },
         enqueuer,
     ))
@@ -901,7 +903,7 @@ pub async fn connect_via_proxy_with_auth<'a, T: Transport>(
     addr: std::net::SocketAddr,
     auth_key: [u8; 256],
     proxy_url: &str,
-    rc_policy: &'static dyn RetryPolicy,
+    rc_policy: &'static dyn retry::RetryPolicy,
 ) -> Result<(Sender<T, mtp::Encrypted>, Enqueuer), io::Error> {
     Sender::connect_via_proxy(
         transport,

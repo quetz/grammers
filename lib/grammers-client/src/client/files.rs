@@ -245,7 +245,7 @@ impl Client {
         file.set_len(size as u64).await?;
         file.seek(SeekFrom::Start(0)).await?;
 
-        let policy = self.0.config.params.retry_policy;
+        let policy = self.0.config.params.reconnection_policy;
 
         // Start workers
         let (tx, mut rx) = unbounded_channel();

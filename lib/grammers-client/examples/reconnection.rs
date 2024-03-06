@@ -34,7 +34,7 @@ async fn async_main() -> Result {
         api_id: 1, // not actually logging in, but has to look real
         api_hash: "".to_string(),
         params: InitParams {
-            retry_policy: &MyPolicy,
+            reconnection_policy: &MyPolicy,
             ..Default::default()
         },
     })
