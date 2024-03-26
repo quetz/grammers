@@ -16,7 +16,6 @@ use grammers_mtproto::transport::{self, Transport};
 use grammers_mtproto::{authentication, MsgId};
 use grammers_tl_types::{self as tl, Deserializable, RemoteCall};
 use log::{debug, info, trace, warn};
-use std::collections::{HashMap, HashSet};
 use std::io;
 use std::io::Error;
 use std::ops::ControlFlow;
@@ -117,11 +116,6 @@ pub struct Sender<T: Transport, M: Mtp> {
     requests: Vec<Request>,
     request_rx: mpsc::UnboundedReceiver<Request>,
 
-    // If messages are serialized to container (on MTP level)
-    // we need to track both container ID and messages it contains
-    // to property re-send them on BadMessage(container_id)
-    containers: HashMap<MsgId, HashSet<MsgId>>,
-
     next_ping: Instant,
     reconnection_policy: &'static dyn retry::RetryPolicy,
 
@@ -136,6 +130,13 @@ struct Request {
     body: Vec<u8>,
     state: RequestState,
     result: oneshot::Sender<Result<Vec<u8>, InvocationError>>,
+}
+
+impl Request {
+    fn id(&self) -> u32 {
+        assert!(self.body.len() >= 4);
+        u32::from_le_bytes([self.body[0], self.body[1], self.body[2], self.body[3]])
+    }
 }
 
 #[derive(Debug)]
@@ -196,8 +197,6 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
                 requests: vec![],
                 request_rx: rx,
 
-                containers: HashMap::new(),
-
                 next_ping: Instant::now() + PING_DELAY,
                 reconnection_policy,
 
@@ -235,8 +234,6 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
                 request_rx: rx,
                 next_ping: Instant::now() + PING_DELAY,
                 reconnection_policy,
-
-                containers: HashMap::new(),
 
                 read_buffer,
                 read_index: 0,
@@ -452,40 +449,34 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
             return;
         }
 
-        // TODO add a test to make sure we only ever send the same request once
-        for request in self
-            .requests
-            .iter_mut()
-            .filter(|r| matches!(r.state, RequestState::NotSerialized))
-        {
-            // TODO make mtp itself use BytesMut to avoid copies
-            if let Some(msg_id) = self.mtp.push(&mut self.write_buffer, &request.body) {
-                assert!(request.body.len() >= 4);
-                let req_id = u32::from_le_bytes([
-                    request.body[0],
-                    request.body[1],
-                    request.body[2],
-                    request.body[3],
-                ]);
-                debug!(
-                    "serialized request {:x} ({}) with {:?}",
-                    req_id,
-                    tl::name_for_id(req_id),
-                    msg_id
-                );
-                // Note how only NotSerialized become Serialized.
-                // Nasty bugs that take ~2h to find occur otherwise!
-                // (e.g. infinite loops leading to transport flood.)
-                request.state = RequestState::Serialized(msg_id);
-            } else {
-                break;
+        if let Some(_) = self.mtp.pop_finalized(&mut self.write_buffer) {
+            // Do nothing, we have something to send
+        } else {
+            if let Some(request) = self
+                .requests
+                .iter_mut()
+                .filter(|r| matches!(r.state, RequestState::NotSerialized))
+                .next()
+            {
+                // TODO make mtp itself use BytesMut to avoid copies
+                if let Some(msg_id) = self.mtp.push(&request.body) {
+                    let req_id = request.id();
+                    debug!(
+                        "serialized request {:x} ({}) with {:?}",
+                        req_id,
+                        tl::name_for_id(req_id),
+                        msg_id
+                    );
+                    // Note how only NotSerialized become Serialized.
+                    // Nasty bugs that take ~2h to find occur otherwise!
+                    // (e.g. infinite loops leading to transport flood.)
+                    request.state = RequestState::Serialized(msg_id);
+
+                    self.mtp.pop_finalized(&mut self.write_buffer);
+                }
             }
         }
 
-        if let Some((container_id, msgs)) = self.mtp.finalize(&mut self.write_buffer) {
-            self.containers
-                .insert(container_id, HashSet::from_iter(msgs.into_iter()));
-        }
         if !self.write_buffer.is_empty() {
             self.transport.pack(&mut self.write_buffer)
         }
@@ -617,35 +608,17 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
         }));
 
         let mut resend_after = None;
+        let mut found = false;
 
         for (msg_id, ret) in result.rpc_results {
-            let mut found = false;
-
-            let msg_ids = if let Some(msg_ids) = self.containers.remove(&msg_id) {
-                debug!(
-                    "got rpc result for container {:?} with messages {:?}",
-                    msg_id, msg_ids
-                );
-                msg_ids
-            } else {
-                let msg_ids = HashSet::from_iter([msg_id].into_iter());
-                msg_ids
-            };
-
-            // remove msg_id from containers, and remove empty containers after that
-            self.containers.retain(|_, v| {
-                v.remove(&msg_id);
-                !v.is_empty()
-            });
-
             for i in (0..self.requests.len()).rev() {
                 let req = &mut self.requests[i];
                 match req.state {
-                    RequestState::Serialized(sid) if msg_ids.contains(&sid) => {
+                    RequestState::Serialized(sid) if msg_id == sid => {
                         panic!("got rpc result {:?} for unsent request {:?}", msg_id, sid);
                     }
 
-                    RequestState::Sent(sid) if msg_ids.contains(&sid) => {
+                    RequestState::Sent(sid) if msg_id == sid => {
                         found = true;
                         let result = match ret.clone() {
                             Ok(x) => {
@@ -867,7 +840,6 @@ pub async fn generate_auth_key<T: Transport>(
                 .finish(auth_key),
             requests: sender.requests,
             request_rx: sender.request_rx,
-            containers: sender.containers,
             next_ping: Instant::now() + PING_DELAY,
             read_buffer: sender.read_buffer,
             read_index: sender.read_index,

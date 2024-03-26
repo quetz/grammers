@@ -33,7 +33,7 @@ pub const DEFAULT_COMPRESSION_THRESHOLD: Option<usize> = Some(512);
 pub struct MsgId(i64);
 
 impl MsgId {
-    fn min(&self, other: Self) -> Self {
+    pub fn min(&self, other: Self) -> Self {
         MsgId(i64::min(self.0, other.0))
     }
 }

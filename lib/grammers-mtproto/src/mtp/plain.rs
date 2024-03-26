@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 // Copyright 2020 - developers of the `grammers` project.
 //
 // Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
@@ -5,7 +7,7 @@
 // <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
-use super::{ContainerInfo, Deserialization, DeserializeError, Mtp};
+use super::{Deserialization, DeserializeError, Mtp};
 use crate::MsgId;
 use grammers_crypto::RingBuffer;
 use grammers_tl_types::{Cursor, Deserializable, Serializable};
@@ -27,12 +29,16 @@ use grammers_tl_types::{Cursor, Deserializable, Serializable};
 /// [Mobile Transport Protocol]: https://core.telegram.org/mtproto
 /// [`Mtp`]: struct.Mtp.html
 #[non_exhaustive]
-pub struct Plain;
+pub struct Plain {
+    msgs: VecDeque<Vec<u8>>,
+}
 
 #[allow(clippy::new_without_default)]
 impl Plain {
     pub fn new() -> Self {
-        Self
+        Self {
+            msgs: VecDeque::new(),
+        }
     }
 }
 
@@ -45,26 +51,34 @@ impl Mtp for Plain {
     /// the authorization key itself.
     ///
     /// [unencrypted messages]: https://core.telegram.org/mtproto/description#unencrypted-message
-    fn push(&mut self, buffer: &mut RingBuffer<u8>, request: &[u8]) -> Option<MsgId> {
+    fn push(&mut self, request: &[u8]) -> Option<MsgId> {
+        let mut buffer = Vec::with_capacity(request.len() + 32);
         if !buffer.is_empty() {
             return None;
         }
 
-        0i64.serialize(buffer); // auth_key_id = 0
+        0i64.serialize(&mut buffer); // auth_key_id = 0
 
         // Even though https://core.telegram.org/mtproto/samples-auth_key
         // seems to imply the `msg_id` has to follow some rules, there is
         // no need to generate a valid `msg_id`, it seems. Just use `0`.
-        0i64.serialize(buffer); // message_id
+        0i64.serialize(&mut buffer); // message_id
 
-        (request.len() as i32).serialize(buffer); // message_data_length
+        (request.len() as i32).serialize(&mut buffer); // message_data_length
         buffer.extend(request); // message_data
+
+        self.msgs.push_back(buffer);
 
         Some(MsgId(0))
     }
 
-    fn finalize(&mut self, _buffer: &mut RingBuffer<u8>) -> Option<ContainerInfo> {
-        None
+    fn pop_finalized(&mut self, buffer: &mut RingBuffer<u8>) -> Option<MsgId> {
+        if let Some(body) = self.msgs.pop_front() {
+            buffer.extend(&body);
+            Some(MsgId(0))
+        } else {
+            None
+        }
     }
 
     /// Validates that the returned data is a correct plain message, and
@@ -126,17 +140,8 @@ mod tests {
         let mut buffer = RingBuffer::with_capacity(0, 0);
         let mut mtp = Plain::new();
 
-        mtp.push(&mut buffer, REQUEST);
-        mtp.finalize(&mut buffer);
+        mtp.push(REQUEST);
+        mtp.pop_finalized(&mut buffer);
         assert_eq!(&buffer[buffer.len() - REQUEST.len()..], REQUEST);
-    }
-
-    #[test]
-    fn ensure_only_one_push_allowed() {
-        let mut buffer = RingBuffer::with_capacity(0, 0);
-        let mut mtp = Plain::new();
-
-        assert!(mtp.push(&mut buffer, REQUEST).is_some());
-        assert!(mtp.push(&mut buffer, REQUEST).is_none());
     }
 }

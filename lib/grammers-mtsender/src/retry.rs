@@ -60,7 +60,7 @@ macro_rules! retrying {
                 Ok(value) => {
                     break Ok(value);
                 }
-                Err(ref err) => match $policy.should_retry(attempts) {
+                Err(_) => match $policy.should_retry(attempts) {
                     std::ops::ControlFlow::Continue(timeout) => {
                         tokio::time::sleep(timeout).await;
                         continue;
