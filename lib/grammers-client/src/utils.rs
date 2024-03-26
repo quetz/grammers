@@ -13,12 +13,12 @@ use grammers_tl_types as tl;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::SystemTime;
 
+pub type Date = DateTime<Utc>;
+
 // This atomic isn't for anything critical, just to generate unique IDs without locks.
 // The worst that can happen if the load and store orderings are wrong is that the IDs
 // are not actually unique which could confuse some of the API results.
 static LAST_ID: AtomicI64 = AtomicI64::new(0);
-
-pub(crate) type Date = DateTime<Utc>;
 
 /// Generate a "random" ID suitable for sending messages or media.
 pub(crate) fn generate_random_id() -> i64 {

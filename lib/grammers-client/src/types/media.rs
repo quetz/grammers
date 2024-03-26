@@ -6,8 +6,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 use crate::types::photo_sizes::{PhotoSize, VecExt};
+use crate::utils::Date;
 use crate::Client;
-use chrono::{DateTime, Utc};
 use grammers_tl_types as tl;
 use std::fmt::Debug;
 
@@ -300,10 +300,10 @@ impl Document {
     }
 
     /// The date on which the file was created, if any.
-    pub fn creation_date(&self) -> Option<DateTime<Utc>> {
+    pub fn creation_date(&self) -> Option<Date> {
         match self.document.document.as_ref() {
             Some(tl::enums::Document::Document(d)) => {
-                Some(DateTime::from_timestamp(d.date as i64, 0).expect("date out of range"))
+                Some(chrono::DateTime::from_timestamp(d.date as i64, 0).expect("date out of range"))
             }
             _ => None,
         }
