@@ -22,11 +22,12 @@
 //! how much data a button's payload can contain, and to keep it simple, we're storing it inline
 //! in decimal, so the numbers can't get too large).
 
+use futures_util::future::{select, Either};
+use grammers_client::session::Session;
 use grammers_client::{button, reply_markup, Client, Config, InputMessage, Update};
-use grammers_session::Session;
-use log;
 use simple_logger::SimpleLogger;
 use std::env;
+use std::pin::pin;
 use tokio::{runtime, task};
 
 type Result = std::result::Result<(), Box<dyn std::error::Error>>;
@@ -46,17 +47,17 @@ fn fib_markup(mut a: u128, mut b: u128) -> reply_markup::Inline {
         rows.push(vec![button::inline(&text, text.as_bytes())]);
 
         let bb = b;
-        b = a + b;
+        b += a;
         a = bb;
     }
 
-    let next = format!("{},{}", a, b);
+    let next = format!("{a},{b}");
     if next.len() > MAX_PAYLOAD_DATA_LEN {
         rows.push(vec![button::inline("I'm satisfied!!", b"done".to_vec())]);
     } else {
         rows.push(vec![
             button::inline("Restart!", b"0,1".to_vec()),
-            button::inline("More!", format!("{},{}", a, b).into_bytes()),
+            button::inline("More!", format!("{a},{b}").into_bytes()),
         ]);
     }
     reply_markup::inline(rows)
@@ -71,7 +72,7 @@ async fn handle_update(_client: Client, update: Update) -> Result {
         }
         Update::CallbackQuery(query) => {
             let data = std::str::from_utf8(query.data()).unwrap();
-            println!("Got callback query for {}", data);
+            println!("Got callback query for {data}");
 
             // First check special-case.
             if data == "done" {
@@ -88,7 +89,7 @@ async fn handle_update(_client: Client, update: Update) -> Result {
                 query
                     .answer()
                     .edit(
-                        InputMessage::from(format!("S{} much fibonacci 🔢", os))
+                        InputMessage::from(format!("S{os} much fibonacci 🔢"))
                             .reply_markup(&fib_markup(a, b)),
                     )
                     .await?;
@@ -110,9 +111,11 @@ async fn async_main() -> Result {
         .init()
         .unwrap();
 
-    let api_id = std::env::var("TG_ID")?.parse().expect("TG_ID invalid");
-    let api_hash = std::env::var("TG_HASH")?.to_string();
-    let token = env::args().skip(1).next().expect("token missing");
+    let api_id = std::env::var("TG_ID")
+        .expect("TG_ID missing")
+        .parse::<i32>()?;
+    let api_hash = std::env::var("TG_HASH").expect("TG_HASH missing");
+    let token = env::args().nth(1).expect("token missing");
 
     println!("Connecting to Telegram...");
     let client = Client::connect(Config {
@@ -132,17 +135,27 @@ async fn async_main() -> Result {
     }
 
     println!("Waiting for messages...");
-    while let Some(update) = client.next_update().await? {
+    loop {
+        let exit = pin!(async { tokio::signal::ctrl_c().await });
+        let upd = pin!(async { client.next_update().await });
+
+        let update = match select(exit, upd).await {
+            Either::Left(_) => {
+                println!("Exiting...");
+                break;
+            }
+            Either::Right((u, _)) => u?,
+        };
+
         let handle = client.clone();
         task::spawn(async move {
-            match handle_update(handle, update).await {
-                Ok(_) => {}
-                Err(e) => eprintln!("Error handling updates!: {}", e),
+            if let Err(e) = handle_update(handle, update).await {
+                eprintln!("Error handling updates!: {e}")
             }
         });
     }
 
-    println!("Saving session file and exiting...");
+    println!("Saving session file...");
     client.session().save_to_file(SESSION_FILE)?;
     Ok(())
 }

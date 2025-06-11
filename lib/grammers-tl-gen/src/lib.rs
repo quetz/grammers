@@ -15,7 +15,9 @@ mod rustifier;
 mod structs;
 
 use grammers_tl_parser::tl::{Category, Definition, Type};
+use std::fs::File;
 use std::io::{self, Write};
+use std::path::Path;
 
 pub struct Config {
     pub gen_name_for_id: bool,
@@ -46,13 +48,16 @@ fn ignore_type(ty: &Type) -> bool {
 }
 
 pub fn generate_rust_code(
-    file: &mut impl Write,
+    dst_dir: impl AsRef<Path>,
     definitions: &[Definition],
     layer: i32,
     config: &Config,
 ) -> io::Result<()> {
+    let _ = std::fs::create_dir(dst_dir.as_ref());
+
+    let mut mod_file = File::create(dst_dir.as_ref().join("mod.rs"))?;
     writeln!(
-        file,
+        mod_file,
         r#"
 // Copyright 2020 - developers of the `grammers` project.
 //
@@ -70,7 +75,7 @@ pub const LAYER: i32 = {};
 
     if config.gen_name_for_id {
         writeln!(
-            file,
+            mod_file,
             r#"
 /// Return the name from the `.tl` definition corresponding to the provided definition identifier.
 pub fn name_for_id(id: u32) -> &'static str {{
@@ -78,11 +83,16 @@ pub fn name_for_id(id: u32) -> &'static str {{
         0x1cb5c415 => "vector","#
         )?;
         for def in definitions {
-            writeln!(file, r#"        0x{:x} => "{}","#, def.id, def.full_name())?;
+            writeln!(
+                mod_file,
+                r#"        0x{:x} => "{}","#,
+                def.id,
+                def.full_name()
+            )?;
         }
 
         writeln!(
-            file,
+            mod_file,
             r#"
         _ => "(unknown)",
     }}
@@ -92,9 +102,31 @@ pub fn name_for_id(id: u32) -> &'static str {{
     }
 
     let metadata = metadata::Metadata::new(definitions);
-    structs::write_category_mod(file, Category::Types, definitions, &metadata, config)?;
-    structs::write_category_mod(file, Category::Functions, definitions, &metadata, config)?;
-    enums::write_enums_mod(file, definitions, &metadata, config)?;
+    structs::write_category_mod(
+        dst_dir.as_ref().join("types"),
+        Category::Types,
+        definitions,
+        &metadata,
+        config,
+    )?;
+    writeln!(mod_file, "pub mod types;")?;
+
+    structs::write_category_mod(
+        dst_dir.as_ref().join("functions"),
+        Category::Functions,
+        definitions,
+        &metadata,
+        config,
+    )?;
+    writeln!(mod_file, "pub mod functions;")?;
+
+    enums::write_enums_mod(
+        dst_dir.as_ref().join("enums"),
+        definitions,
+        &metadata,
+        config,
+    )?;
+    writeln!(mod_file, "pub mod enums;")?;
 
     Ok(())
 }

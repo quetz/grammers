@@ -1,0 +1,6 @@
+[package]
+name = "test-helpers"
+edition = "2024"
+
+[dependencies]
+toml = "0.8"

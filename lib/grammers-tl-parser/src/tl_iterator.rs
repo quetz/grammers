@@ -5,7 +5,7 @@
 // <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
-use crate::errors::ParseError;
+use crate::errors::{ParseError, ParseErrorKind};
 use crate::tl::{Category, Definition};
 use crate::utils::remove_tl_comments;
 
@@ -63,7 +63,10 @@ impl Iterator for TlIterator {
                 self.category = Category::Types;
                 definition.trim()
             } else {
-                return Some(Err(ParseError::UnknownSeparator));
+                return Some(Err(ParseError::new(
+                    ParseErrorKind::UnknownSeparator,
+                    definition,
+                )));
             }
         } else {
             definition
@@ -75,7 +78,7 @@ impl Iterator for TlIterator {
                 d.category = self.category;
                 Ok(d)
             }
-            x => x,
+            Err(kind) => Err(ParseError::new(kind, definition)),
         })
     }
 }
@@ -88,8 +91,14 @@ mod tests {
     #[test]
     fn parse_bad_separator() {
         let mut it = TlIterator::new("---foo---");
-        assert_eq!(it.next(), Some(Err(ParseError::UnknownSeparator)));
-        assert_eq!(it.next(), None);
+        assert!(matches!(
+            it.next(),
+            Some(Err(ParseError {
+                kind: ParseErrorKind::UnknownSeparator,
+                ..
+            }))
+        ));
+        assert!(matches!(it.next(), None));
     }
 
     #[test]
@@ -107,6 +116,6 @@ mod tests {
         assert_eq!(it.next().unwrap().unwrap().id, 1);
         assert!(it.next().unwrap().is_err());
         assert_eq!(it.next().unwrap().unwrap().id, 3);
-        assert_eq!(it.next(), None);
+        assert!(matches!(it.next(), None));
     }
 }

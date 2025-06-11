@@ -387,6 +387,11 @@ impl ChatHashCache {
                 U::BotBusinessConnect(u) => match &u.connection {
                     tl::enums::BotBusinessConnection::Connection(con) => self.has(con.user_id),
                 },
+                U::BusinessBotCallbackQuery(_) => true,
+
+                U::BroadcastRevenueTransactions(_) => true,
+                U::StarsBalance(_) => true,
+                U::StarsRevenueStatus(_) => true,
             },
             // Telegram should be including all the peers referenced in the updates in
             // `.users` and `.chats`, so no instrospection is done (unlike for `UpdateShort`).
@@ -573,6 +578,8 @@ impl ChatHashCache {
                         MA::GiveawayLaunch => true,
                         MA::GiveawayResults(_) => true,
                         MA::BoostApply(_) => true,
+                        MA::PaymentRefunded(_) => true,
+                        MA::GiftStars(_) => true,
                     }
             }
         }

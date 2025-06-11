@@ -11,9 +11,8 @@
 //! ```
 
 use futures_util::future::{select, Either};
+use grammers_client::session::Session;
 use grammers_client::{Client, Config, InitParams, Update};
-use grammers_session::Session;
-use log;
 use simple_logger::SimpleLogger;
 use std::env;
 use std::pin::pin;
@@ -42,9 +41,11 @@ async fn async_main() -> Result {
         .init()
         .unwrap();
 
-    let api_id = std::env::var("TG_ID")?.parse().expect("TG_ID invalid");
-    let api_hash = std::env::var("TG_HASH")?.to_string();
-    let token = env::args().skip(1).next().expect("token missing");
+    let api_id = std::env::var("TG_ID")
+        .expect("TG_ID missing")
+        .parse::<i32>()?;
+    let api_hash = std::env::var("TG_HASH").expect("TG_HASH missing");
+    let token = env::args().nth(1).expect("token missing");
 
     println!("Connecting to Telegram...");
     let client = Client::connect(Config {
@@ -72,31 +73,24 @@ async fn async_main() -> Result {
     // This code uses `select` on Ctrl+C to gracefully stop the client and have a chance to
     // save the session. You could have fancier logic to save the session if you wanted to
     // (or even save it on every update). Or you could also ignore Ctrl+C and just use
-    // `while let Some(updates) =  client.next_updates().await?`.
+    // `let update = client.next_update().await?`.
     //
     // Using `tokio::select!` would be a lot cleaner but add a heavy dependency,
     // so a manual `select` is used instead by pinning async blocks by hand.
     loop {
-        let update = {
-            let exit = pin!(async { tokio::signal::ctrl_c().await });
-            let upd = pin!(async { client.next_update().await });
+        let exit = pin!(async { tokio::signal::ctrl_c().await });
+        let upd = pin!(async { client.next_update().await });
 
-            match select(exit, upd).await {
-                Either::Left(_) => None,
-                Either::Right((u, _)) => Some(u),
-            }
-        };
-
-        let update = match update {
-            None | Some(Ok(None)) => break,
-            Some(u) => u?.unwrap(),
+        let update = match select(exit, upd).await {
+            Either::Left(_) => break,
+            Either::Right((u, _)) => u?,
         };
 
         let handle = client.clone();
         task::spawn(async move {
             match handle_update(handle, update).await {
                 Ok(_) => {}
-                Err(e) => eprintln!("Error handling updates!: {}", e),
+                Err(e) => eprintln!("Error handling updates!: {e}"),
             }
         });
     }

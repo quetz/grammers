@@ -16,7 +16,7 @@ pub use generated::LAYER as VERSION;
 use generated::{enums, types};
 use grammers_tl_types::deserialize::Error as DeserializeError;
 pub use message_box::{channel_id, PrematureEndReason};
-pub use message_box::{Gap, MessageBox};
+pub use message_box::{Gap, MessageBox, UpdateResult};
 use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, Write};

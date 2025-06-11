@@ -176,7 +176,7 @@ impl Enqueuer {
 }
 
 impl<T: Transport, M: Mtp> Sender<T, M> {
-    async fn connect<'a>(
+    async fn connect(
         transport: T,
         mtp: M,
         addr: std::net::SocketAddr,
@@ -302,6 +302,8 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
             Write(io::Result<usize>),
         }
 
+        log::warn!("SENDER step");
+
         let mut attempts = 0u8;
         loop {
             if attempts > 5 {
@@ -336,19 +338,22 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
             );
 
             let sel = {
-                let sleep = pin!(async { sleep_until(self.next_ping).await });
-                let recv_req = pin!(async { self.request_rx.recv().await });
-                let recv_data =
-                    pin!(async { reader.read(&mut self.read_buffer[self.read_index..]).await });
+                log::warn!("next ping is at {:?}", self.next_ping);
+                let sleep = Box::pin(sleep_until(self.next_ping));
+                let recv_req = Box::pin(self.request_rx.recv());
+                let recv_data = Box::pin(reader.read(&mut self.read_buffer[self.read_index..]));
                 let send_data = pin!(async {
-                    if self.write_buffer.is_empty() {
+                    let r = if self.write_buffer.is_empty() {
                         pending().await
                     } else {
                         writer.write(&self.write_buffer[self.write_index..]).await
-                    }
+                    };
+                    r
                 });
+                let lhs = select(sleep, recv_req);
+                let rhs = select(recv_data, send_data);
 
-                match select(select(sleep, recv_req), select(recv_data, send_data)).await {
+                match select(lhs, rhs).await {
                     Either::Left((Either::Left(_), _)) => Sel::Sleep,
                     Either::Left((Either::Right((request, _)), _)) => Sel::Request(request),
                     Either::Right((Either::Left((n, _)), _)) => Sel::Read(n),
@@ -449,31 +454,28 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
             return;
         }
 
-        if let Some(_) = self.mtp.pop_finalized(&mut self.write_buffer) {
+        if self.mtp.pop_finalized(&mut self.write_buffer).is_some() {
             // Do nothing, we have something to send
-        } else {
-            if let Some(request) = self
-                .requests
-                .iter_mut()
-                .filter(|r| matches!(r.state, RequestState::NotSerialized))
-                .next()
-            {
-                // TODO make mtp itself use BytesMut to avoid copies
-                if let Some(msg_id) = self.mtp.push(&request.body) {
-                    let req_id = request.id();
-                    debug!(
-                        "serialized request {:x} ({}) with {:?}",
-                        req_id,
-                        tl::name_for_id(req_id),
-                        msg_id
-                    );
-                    // Note how only NotSerialized become Serialized.
-                    // Nasty bugs that take ~2h to find occur otherwise!
-                    // (e.g. infinite loops leading to transport flood.)
-                    request.state = RequestState::Serialized(msg_id);
+        } else if let Some(request) = self
+            .requests
+            .iter_mut()
+            .find(|r| matches!(r.state, RequestState::NotSerialized))
+        {
+            // TODO make mtp itself use BytesMut to avoid copies
+            if let Some(msg_id) = self.mtp.push(&request.body) {
+                let req_id = request.id();
+                debug!(
+                    "serialized request {:x} ({}) with {:?}",
+                    req_id,
+                    tl::name_for_id(req_id),
+                    msg_id
+                );
+                // Note how only NotSerialized become Serialized.
+                // Nasty bugs that take ~2h to find occur otherwise!
+                // (e.g. infinite loops leading to transport flood.)
+                request.state = RequestState::Serialized(msg_id);
 
-                    self.mtp.pop_finalized(&mut self.write_buffer);
-                }
+                self.mtp.pop_finalized(&mut self.write_buffer);
             }
         }
 
@@ -749,7 +751,7 @@ pub async fn connect_via_proxy<'a, T: Transport>(
 
 async fn connect_stream(addr: &std::net::SocketAddr) -> Result<NetStream, std::io::Error> {
     info!("connecting...");
-    Ok(NetStream::Tcp(TcpStream::connect(addr.clone()).await?))
+    Ok(NetStream::Tcp(TcpStream::connect(addr).await?))
 }
 
 #[cfg(feature = "proxy")]

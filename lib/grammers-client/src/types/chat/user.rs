@@ -115,6 +115,8 @@ impl User {
                 color: None,
                 profile_color: None,
                 bot_business: false,
+                bot_has_main_app: false,
+                bot_active_users: None,
             },
             tl::enums::User::User(user) => user,
         })
@@ -253,7 +255,7 @@ impl User {
     /// If the current user is a bot, does it have [privacy mode] enabled?
     ///
     /// * Bots with privacy enabled won't see messages in groups unless they are replied or the
-    /// command includes their name (`/command@bot`).
+    ///   command includes their name (`/command@bot`).
     /// * Bots with privacy disabled will be able to see all messages in a group.
     ///
     /// [privacy mode]: https://core.telegram.org/bots#privacy-mode

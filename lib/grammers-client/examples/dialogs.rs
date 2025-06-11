@@ -10,9 +10,8 @@
 //! cargo run --example dialogs
 //! ```
 
+use grammers_client::session::Session;
 use grammers_client::{Client, Config, SignInError};
-use grammers_session::Session;
-use log;
 use simple_logger::SimpleLogger;
 use std::io::{self, BufRead as _, Write as _};
 use tokio::runtime;
@@ -41,8 +40,10 @@ async fn async_main() -> Result<()> {
         .init()
         .unwrap();
 
-    let api_id = std::env::var("TG_ID")?.parse().expect("TG_ID invalid");
-    let api_hash = std::env::var("TG_HASH")?.to_string();
+    let api_id = std::env::var("TG_ID")
+        .expect("TG_ID invalid")
+        .parse::<i32>()?;
+    let api_hash = std::env::var("TG_HASH").expect("TG_HASH not found");
 
     println!("Connecting to Telegram...");
     let client = Client::connect(Config {
@@ -82,10 +83,7 @@ async fn async_main() -> Result<()> {
         match client.session().save_to_file(SESSION_FILE) {
             Ok(_) => {}
             Err(e) => {
-                println!(
-                    "NOTE: failed to save the session, will sign out when done: {}",
-                    e
-                );
+                println!("NOTE: failed to save the session, will sign out when done: {e}");
                 sign_out = true;
             }
         }

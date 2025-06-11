@@ -2,6 +2,7 @@
 members = [
     "bin/scrape-docs",
     "bin/tl-to-json",
+    "bin/xtask",
     "lib/grammers",
     "lib/grammers-client",
     "lib/grammers-crypto",
@@ -11,6 +12,7 @@ members = [
     "lib/grammers-tl-gen",
     "lib/grammers-tl-parser",
     "lib/grammers-tl-types",
+    "lib/test-helpers",
 ]
 resolver = "2"
 
@@ -23,3 +25,31 @@ grammers-session = { path = "lib/grammers-session" }
 grammers-tl-gen = { path = "lib/grammers-tl-gen" }
 grammers-tl-parser = { path = "lib/grammers-tl-parser" }
 grammers-tl-types = { path = "lib/grammers-tl-types" }
+test-helpers = { path = "lib/test-helpers" }
+
+[workspace.package]
+authors = ["Lonami Exo <totufals@hotmail.com>"]
+license = "MIT OR Apache-2.0"
+homepage = "https://github.com/quetz/grammers"
+repository = "https://github.com/quetz/grammers"
+version = "0.9.0"
+edition = "2024"
+keywords = ["telegram", "tl"]
+
+[workspace.dependencies]
+anyhow = { version = "1" }
+tokio = { version = "1", features = ["full"] }
+tracing = { version = "0.1" }
+log = { version = "0.4" }
+serde = { version = "1" }
+serde_json = { version = "1" }
+
+grammers-client = { path = "lib/grammers-client" }
+grammers-crypto = { path = "lib/grammers-crypto" }
+grammers-mtproto = { path = "lib/grammers-mtproto" }
+grammers-mtsender = { path = "lib/grammers-mtsender" }
+grammers-session = { path = "lib/grammers-session" }
+grammers-tl-gen = { path = "lib/grammers-tl-gen" }
+grammers-tl-parser = { path = "lib/grammers-tl-parser" }
+grammers-tl-types = { path = "lib/grammers-tl-types" }
+test-helpers = { path = "lib/test-helpers" }

@@ -5,4 +5,7 @@
 // <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
-include!("../../includes/check_deps_documented.rs");
+#[test]
+fn test_deps() {
+    test_helpers::check_deps_documented();
+}

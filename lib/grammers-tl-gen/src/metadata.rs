@@ -38,7 +38,7 @@ impl<'a> Metadata<'a> {
                         metadata
                             .unused_flags
                             .entry((&d.namespace, &d.name))
-                            .or_insert_with(Vec::new)
+                            .or_default()
                             .push(pf)
                     }
                 })
@@ -53,7 +53,7 @@ impl<'a> Metadata<'a> {
             metadata
                 .defs_with_type
                 .entry((&d.ty.namespace, &d.ty.name))
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(d);
         });
 
@@ -69,7 +69,7 @@ impl<'a> Metadata<'a> {
     pub fn is_unused_flag(&self, def: &Definition, flag: &Parameter) -> bool {
         self.unused_flags
             .get(&(&def.namespace, &def.name))
-            .map(|flags| flags.iter().any(|f| *f == flag))
+            .map(|flags| flags.contains(&flag))
             .unwrap_or(false)
     }
 

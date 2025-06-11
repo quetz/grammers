@@ -526,6 +526,7 @@ impl Client {
                 update_stickersets_order: false,
                 invert_media: false,
                 quick_reply_shortcut: None,
+                effect: None,
             })
             .await
         } else {
@@ -556,6 +557,7 @@ impl Client {
                 update_stickersets_order: false,
                 invert_media: false,
                 quick_reply_shortcut: None,
+                effect: None,
             })
             .await
         }?;

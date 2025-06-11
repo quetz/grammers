@@ -8,16 +8,12 @@
 use grammers_tl_gen::{generate_rust_code, Config};
 use grammers_tl_parser::parse_tl_file;
 use std::env;
-use std::fs::File;
-use std::io::{BufWriter, Write};
 use std::path::Path;
 
 const CURRENT_VERSION: i32 = 2;
 
 fn main() -> std::io::Result<()> {
-    let mut file = BufWriter::new(File::create(
-        Path::new(&env::var("OUT_DIR").unwrap()).join("generated.rs"),
-    )?);
+    let dst_dir = Path::new(&env::var("OUT_DIR").unwrap()).join("generated");
 
     // Using boxed variants in the definitions so that deserialization fails if any constructor ID changes.
     let definitions = parse_tl_file(
@@ -36,8 +32,7 @@ fn main() -> std::io::Result<()> {
         ..Default::default()
     };
 
-    generate_rust_code(&mut file, &definitions, CURRENT_VERSION, &config)?;
-    file.flush()?;
+    generate_rust_code(dst_dir, &definitions, CURRENT_VERSION, &config)?;
 
     Ok(())
 }

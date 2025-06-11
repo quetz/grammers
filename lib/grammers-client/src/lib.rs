@@ -46,3 +46,7 @@ pub(crate) mod utils;
 
 pub use client::{Client, Config, InitParams, SignInError};
 pub use types::{button, reply_markup, ChatMap, InputMessage, Update};
+
+pub use grammers_mtproto::transport;
+pub use grammers_session as session;
+pub use grammers_tl_types;

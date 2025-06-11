@@ -12,10 +12,9 @@ use super::Client;
 use crate::types::{ChatMap, Update};
 use futures_util::future::{select, Either};
 pub use grammers_mtsender::{AuthorizationError, InvocationError};
-use grammers_session::channel_id;
+use grammers_session::{channel_id, UpdateResult};
 pub use grammers_session::{PrematureEndReason, UpdateState};
 use grammers_tl_types as tl;
-use log::warn;
 use std::pin::pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -27,16 +26,14 @@ const UPDATE_LIMIT_EXCEEDED_LOG_COOLDOWN: Duration = Duration::from_secs(300);
 impl Client {
     /// Returns the next update from the buffer where they are queued until used.
     ///
-    /// Similar using an iterator manually, this method will return `Some` until no more updates
-    /// are available (e.g. a graceful disconnection occurred).
-    ///
-    /// # Examples
+    /// # Example
     ///
     /// ```
     /// # async fn f(client: grammers_client::Client) -> Result<(), Box<dyn std::error::Error>> {
     /// use grammers_client::Update;
     ///
-    /// while let Some(update) = client.next_update().await? {
+    /// loop {
+    ///     let update = client.next_update().await?;
     ///     // Echo incoming messages and ignore everything else
     ///     match update {
     ///         Update::NewMessage(mut message) if !message.outgoing() => {
@@ -48,12 +45,43 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn next_update(&self) -> Result<Option<Update>, InvocationError> {
+    pub async fn next_update(&self) -> Result<Update, InvocationError> {
+        loop {
+            let (update, chats) = self.next_raw_update().await?;
+
+            if let Some(update) = Update::new(self, update, &chats) {
+                return Ok(update);
+            }
+        }
+    }
+
+    /// Returns the next raw update and associated chat map from the buffer where they are queued until used.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # async fn f(client: grammers_client::Client) -> Result<(), Box<dyn std::error::Error>> {
+    /// loop {
+    ///     let (update, chats) = client.next_raw_update().await?;
+    ///
+    ///     // Print all incoming updates in their raw form
+    ///     dbg!(update);
+    /// }
+    /// # Ok(())
+    /// # }
+    ///
+    /// ```
+    ///
+    /// P.S. If you don't receive updateBotInlineSend, go to [@BotFather](https://t.me/BotFather), select your bot and click "Bot Settings", then "Inline Feedback" and select probability.
+    ///
+    pub async fn next_raw_update(
+        &self,
+    ) -> Result<(tl::enums::Update, Arc<ChatMap>), InvocationError> {
         loop {
             let (deadline, get_diff, get_channel_diff) = {
                 let state = &mut *self.0.state.write().unwrap();
-                if let Some(updates) = state.updates.pop_front() {
-                    return Ok(Some(updates));
+                if let Some(update) = state.updates.pop_front() {
+                    return Ok(update);
                 }
                 (
                     state.message_box.check_deadlines(), // first, as it might trigger differences
@@ -153,18 +181,12 @@ impl Client {
                 continue;
             }
 
-            let step = {
-                let sleep = pin!(async { sleep_until(deadline.into()).await });
-                let step = pin!(async { self.step().await });
+            let sleep = pin!(async { sleep_until(deadline.into()).await });
+            let step = pin!(async { self.step().await });
 
-                match select(sleep, step).await {
-                    Either::Left(_) => None,
-                    Either::Right((step, _)) => Some(step),
-                }
-            };
-
-            if let Some(step) = step {
-                step?;
+            match select(sleep, step).await {
+                Either::Left(_) => {}
+                Either::Right((step, _)) => step?,
             }
         }
     }
@@ -174,9 +196,9 @@ impl Client {
             return;
         }
 
-        let mut result = Option::<(Vec<_>, Vec<_>, Vec<_>)>::None;
-        {
+        let result = {
             let state = &mut *self.0.state.write().unwrap();
+            let mut res = UpdateResult::default();
 
             for updates in all_updates {
                 if state
@@ -190,22 +212,23 @@ impl Client {
                     .message_box
                     .process_updates(updates, &state.chat_hashes)
                 {
-                    Ok(tup) => {
-                        if let Some(res) = result.as_mut() {
-                            res.0.extend(tup.0);
-                            res.1.extend(tup.1);
-                            res.2.extend(tup.2);
-                        } else {
-                            result = Some(tup);
-                        }
+                    Ok(UpdateResult {
+                        updates,
+                        users,
+                        chats,
+                    }) => {
+                        res.updates.extend(updates);
+                        res.users.extend(users);
+                        res.chats.extend(chats);
                     }
                     Err(_) => return,
                 }
             }
-        }
+            res
+        };
 
-        if let Some((updates, users, chats)) = result {
-            self.extend_update_queue(updates, ChatMap::new(users, chats));
+        if !result.updates.is_empty() {
+            self.extend_update_queue(result.updates, ChatMap::new(result.users, result.chats));
         }
     }
 
@@ -223,7 +246,7 @@ impl Client {
 
                 updates.truncate(updates.len() - exceeds);
                 if notify {
-                    warn!(
+                    log::warn!(
                         "{} updates were dropped because the update_queue_limit was exceeded",
                         exceeds
                     );
@@ -233,11 +256,9 @@ impl Client {
             }
         }
 
-        state.updates.extend(
-            updates
-                .into_iter()
-                .flat_map(|u| Update::new(self, u, &chat_map)),
-        );
+        state
+            .updates
+            .extend(updates.into_iter().map(|u| (u, chat_map.clone())));
     }
 
     /// Synchronize the updates state to the session.

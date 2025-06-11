@@ -9,6 +9,7 @@ use grammers_tl_gen::{generate_rust_code, Config};
 use grammers_tl_parser::parse_tl_file;
 use grammers_tl_parser::tl::Definition;
 use std::io;
+use walkdir::WalkDir;
 
 const LAYER: i32 = 0;
 
@@ -17,9 +18,9 @@ fn get_definitions(contents: &str) -> Vec<Definition> {
 }
 
 fn gen_rust_code(definitions: &[Definition]) -> io::Result<String> {
-    let mut file = Vec::new();
+    let tmp = tempdir::TempDir::new("gen_rust")?;
     generate_rust_code(
-        &mut file,
+        &tmp,
         definitions,
         LAYER,
         &Config {
@@ -30,7 +31,19 @@ fn gen_rust_code(definitions: &[Definition]) -> io::Result<String> {
             impl_from_type: true,
         },
     )?;
-    Ok(String::from_utf8(file).unwrap())
+
+    let mut r = String::new();
+
+    for entry in WalkDir::new(&tmp) {
+        let entry = entry?;
+        if entry.metadata()?.is_dir() {
+            continue;
+        }
+        let s = std::fs::read_to_string(entry.path())?;
+        r.push_str(&s);
+    }
+
+    Ok(r)
 }
 
 #[test]

@@ -11,9 +11,11 @@
 use crate::grouper;
 use crate::metadata::Metadata;
 use crate::rustifier;
-use crate::{ignore_type, Config};
+use crate::{Config, ignore_type};
 use grammers_tl_parser::tl::{Category, Definition, ParameterType};
+use std::fs::File;
 use std::io::{self, Write};
+use std::path::Path;
 
 /// Get the list of generic parameters:
 ///
@@ -294,7 +296,7 @@ fn write_deserializable<W: Write>(
                     )?;
                 } else {
                     write!(file, "let {} = ", rustifier::parameters::attr_name(param))?;
-                    if let Some(ref flag) = flag {
+                    if let Some(flag) = flag {
                         writeln!(file, "if ({} & {}) != 0 {{", flag.name, 1 << flag.index)?;
                         write!(file, "{}            Some(", indent)?;
                     }
@@ -467,86 +469,85 @@ fn write_definition<W: Write>(
 }
 
 /// Write an entire module for the desired category.
-pub(crate) fn write_category_mod<W: Write>(
-    mut file: &mut W,
+pub(crate) fn write_category_mod(
+    dst_dir: impl AsRef<Path>,
     category: Category,
     definitions: &[Definition],
     metadata: &Metadata,
     config: &Config,
 ) -> io::Result<()> {
-    // Begin outermost mod
-    match category {
-        Category::Types => {
-            write!(
-                file,
-                "\
-                 /// This module contains all of the bare types, each\n\
-                 /// represented by a `struct`. All of them implement\n\
-                 /// [`Identifiable`], [`Serializable`] and [`Deserializable`].\n\
-                 ///\n\
-                 /// [`Identifiable`]: ../trait.Identifiable.html\n\
-                 /// [`Serializable`]: ../trait.Serializable.html\n\
-                 /// [`Deserializable`]: ../trait.Deserializable.html\n\
-                 #[allow(clippy::cognitive_complexity, clippy::identity_op, clippy::unreadable_literal)]\n\
-                 pub mod types {{\n\
-                 "
-            )?;
-        }
-        Category::Functions => {
-            writeln!(
-                file,
-                "\
-            /// This module contains all of the functions, each\n\
-            /// represented by a `struct`. All of them implement\n\
-            /// [`Identifiable`] and [`Serializable`].\n\
-            ///\n\
-            /// To find out the type that Telegram will return upon\n\
-            /// invoking one of these requests, check out the associated\n\
-            /// type in the corresponding [`RemoteCall`] trait impl.\n\
-            ///\n\
-            /// [`Identifiable`]: ../trait.Identifiable.html\n\
-            /// [`Serializable`]: ../trait.Serializable.html\n\
-            /// [`RemoteCall`]: trait.RemoteCall.html\n\
-            #[allow(clippy::cognitive_complexity, clippy::identity_op, clippy::unreadable_literal)]\n\
-            pub mod functions {{
-            "
-            )?;
-        }
-    }
+    let _ = std::fs::create_dir(dst_dir.as_ref());
+
+    let mut mod_file = File::create(dst_dir.as_ref().join("mod.rs"))?;
 
     let grouped = grouper::group_by_ns(definitions, category);
     let mut sorted_keys: Vec<&String> = grouped.keys().collect();
     sorted_keys.sort();
     for key in sorted_keys.into_iter() {
-        // Begin possibly inner mod
-        let indent = if key.is_empty() {
-            "    "
+        let file = if key.is_empty() {
+            &mut mod_file
         } else {
-            writeln!(file, "    #[allow(clippy::unreadable_literal)]")?;
-            writeln!(file, "    pub mod {} {{", key)?;
-            "        "
+            writeln!(mod_file, "pub mod {};", key)?;
+            &mut File::create(dst_dir.as_ref().join(format!("{}.rs", key)))?
         };
 
+        if !key.is_empty() {
+            writeln!(file, "#![allow(clippy::unreadable_literal)]")?;
+        }
+
+        match category {
+            Category::Types => {
+                write!(
+                    file,
+                    "\
+                     //! This module contains all of the bare types, each\n\
+                     //! represented by a `struct`. All of them implement\n\
+                     //! [`Identifiable`], [`Serializable`] and [`Deserializable`].\n\
+                     //!\n\
+                     //! [`Identifiable`]: ../trait.Identifiable.html\n\
+                     //! [`Serializable`]: ../trait.Serializable.html\n\
+                     //! [`Deserializable`]: ../trait.Deserializable.html\n\
+                     #![allow(clippy::cognitive_complexity, clippy::identity_op, clippy::unreadable_literal)]\n\
+                     #![allow(unused_imports)]\n\
+                     "
+                )?;
+            }
+            Category::Functions => {
+                writeln!(
+                    file,
+                    "\
+                //! This module contains all of the functions, each\n\
+                //! represented by a `struct`. All of them implement\n\
+                //! [`Identifiable`] and [`Serializable`].\n\
+                //!\n\
+                //! To find out the type that Telegram will return upon\n\
+                //! invoking one of these requests, check out the associated\n\
+                //! type in the corresponding [`RemoteCall`] trait impl.\n\
+                //!\n\
+                //! [`Identifiable`]: ../trait.Identifiable.html\n\
+                //! [`Serializable`]: ../trait.Serializable.html\n\
+                //! [`RemoteCall`]: trait.RemoteCall.html\n\
+                #![allow(clippy::cognitive_complexity, clippy::identity_op, clippy::unreadable_literal)]\n\
+                #![allow(unused_imports)]\n\
+                "
+                )?;
+            }
+        }
+        // Begin possibly inner mod
         if category == Category::Types && config.impl_from_enum {
             // If all of the conversions are infallible this will be unused.
             // Don't bother checking this beforehand, just allow warnings.
-            writeln!(file, "{}#[allow(unused_imports)]", indent)?;
-            writeln!(file, "{}use std::convert::TryFrom;", indent)?;
+            writeln!(file, "use std::convert::TryFrom;")?;
         }
+        writeln!(file, "use crate::Identifiable;")?;
 
         for definition in grouped[key]
             .iter()
             .filter(|def| def.category == Category::Functions || !ignore_type(&def.ty))
         {
-            write_definition(&mut file, indent, definition, metadata, config)?;
-        }
-
-        // End possibly inner mod
-        if !key.is_empty() {
-            writeln!(file, "    }}")?;
+            write_definition(file, "", definition, metadata, config)?;
         }
     }
 
-    // End outermost mod
-    writeln!(file, "}}")
+    Ok(())
 }

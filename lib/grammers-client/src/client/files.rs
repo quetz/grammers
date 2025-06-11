@@ -194,10 +194,7 @@ impl Client {
             }
         }
         if downloadable.to_input_location().is_none() {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                "media not downloadable",
-            ));
+            return Err(io::Error::other("media not downloadable"));
         }
 
         let mut download = self.iter_download(downloadable);
@@ -216,11 +213,7 @@ impl Client {
 
     async fn load<P: AsRef<Path>>(path: P, download: &mut DownloadIter) -> Result<(), io::Error> {
         let mut file = fs::File::create(path).await?;
-        while let Some(chunk) = download
-            .next()
-            .await
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?
-        {
+        while let Some(chunk) = download.next().await.map_err(io::Error::other)? {
             file.write_all(&chunk).await?;
         }
 
@@ -330,8 +323,7 @@ impl Client {
 
         // Check if all tasks finished succesfully
         for task in tasks {
-            task.await?
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            task.await?.map_err(io::Error::other)?;
         }
         Ok(())
     }
@@ -407,13 +399,10 @@ impl Client {
                                 bytes,
                             })
                             .await
-                            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                            .map_err(io::Error::other)?;
 
                         if !ok {
-                            return Err(io::Error::new(
-                                io::ErrorKind::Other,
-                                "server failed to store uploaded data",
-                            ));
+                            return Err(io::Error::other("server failed to store uploaded data"));
                         }
                     }
                     Ok(())
@@ -444,13 +433,10 @@ impl Client {
                         bytes,
                     })
                     .await
-                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                    .map_err(io::Error::other)?;
 
                 if !ok {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        "server failed to store uploaded data",
-                    ));
+                    return Err(io::Error::other("server failed to store uploaded data"));
                 }
             }
             Ok(Uploaded::from_raw(
@@ -516,7 +502,7 @@ struct PartStream<'a, S: AsyncRead + Unpin> {
 
 impl<'a, S: AsyncRead + Unpin> PartStream<'a, S> {
     fn new(stream: &'a mut S, size: usize) -> Self {
-        let total_parts = ((size + MAX_CHUNK_SIZE as usize - 1) / MAX_CHUNK_SIZE as usize) as i32;
+        let total_parts = size.div_ceil(MAX_CHUNK_SIZE as usize) as i32;
         Self {
             inner: AsyncMutex::new(PartStreamInner {
                 stream,

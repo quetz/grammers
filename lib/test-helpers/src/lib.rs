@@ -1,16 +1,8 @@
-// Copyright 2020 - developers of the `grammers` project.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
 use std::fs::File;
 use std::io::Read;
 use toml::Value;
 
-#[test]
-fn check_deps_documented() {
+pub fn check_deps_documented() {
     let mut listed_deps = {
         let mut deps = std::collections::HashSet::new();
         let mut file = File::open("Cargo.toml").expect("Cargo.toml must exist");
@@ -43,13 +35,7 @@ fn check_deps_documented() {
 
         markdown
             .lines()
-            .filter_map(|line| {
-                if line.starts_with("## ") {
-                    Some(line[3..].to_string())
-                } else {
-                    None
-                }
-            })
+            .filter_map(|line| line.strip_prefix("## ").map(str::to_owned))
             .collect::<Vec<_>>()
     };
     documented_deps.sort();

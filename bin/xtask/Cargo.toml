@@ -1,9 +1,9 @@
 [package]
+name = "xtask"
 version.workspace = true
-name = "tl-to-json"
 edition.workspace = true
 
 [dependencies]
+anyhow = { workspace = true }
+grammers-tl-gen = { workspace = true }
 grammers-tl-parser = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }

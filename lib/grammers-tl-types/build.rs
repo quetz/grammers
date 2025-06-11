@@ -78,7 +78,9 @@ fn main() -> std::io::Result<()> {
         impl_from_type: cfg!(feature = "impl-from-type"),
     };
 
-    generate_rust_code(&mut file, &definitions, layer, &config)?;
+    let dst_dir = Path::new(&env::var("OUT_DIR").unwrap()).join("generated");
+
+    generate_rust_code(dst_dir, &definitions, layer, &config)?;
     file.flush()?;
     Ok(())
 }

@@ -83,6 +83,8 @@ impl Channel {
                         profile_color: None,
                         emoji_status: None,
                         level: None,
+                        signature_profiles: false,
+                        subscription_until_date: None,
                     })
                 } else {
                     panic!("tried to create broadcast channel from megagroup");

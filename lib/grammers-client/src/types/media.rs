@@ -85,7 +85,7 @@ pub enum Media {
     Dice(Dice),
     Venue(Venue),
     GeoLive(GeoLive),
-    WebPage(WebPage),
+    WebPage(Box<WebPage>),
 }
 
 impl Photo {
@@ -814,6 +814,7 @@ impl Uploaded {
         match &self.input_file {
             tl::enums::InputFile::File(f) => f.name.as_ref(),
             tl::enums::InputFile::Big(f) => f.name.as_ref(),
+            tl::enums::InputFile::StoryDocument(_) => "",
         }
     }
 }
@@ -837,7 +838,7 @@ impl Media {
                     Self::Document(document)
                 })
             }
-            M::WebPage(webpage) => Some(Self::WebPage(WebPage::from_media(webpage))),
+            M::WebPage(webpage) => Some(Self::WebPage(Box::new(WebPage::from_media(webpage)))),
             M::Venue(venue) => Some(Self::Venue(Venue::from_media(venue))),
             M::Game(_) => None,
             M::Invoice(_) => None,
@@ -847,6 +848,7 @@ impl Media {
             M::Story(_) => None,
             M::Giveaway(_) => None,
             M::GiveawayResults(_) => None,
+            M::PaidMedia(_) => None,
         }
     }
 

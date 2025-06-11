@@ -23,9 +23,9 @@ use mime_guess::mime;
 use simple_logger::SimpleLogger;
 use tokio::runtime;
 
+use grammers_client::session::Session;
 use grammers_client::types::Media::{Contact, Document, Photo, Sticker};
-use grammers_client::types::*;
-use grammers_session::Session;
+use grammers_client::types::{Downloadable, Media};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -37,9 +37,11 @@ async fn async_main() -> Result<()> {
         .init()
         .unwrap();
 
-    let api_id = std::env::var("TG_ID")?.parse().expect("TG_ID invalid");
-    let api_hash = std::env::var("TG_HASH")?.to_string();
-    let chat_name = env::args().skip(1).next().expect("chat name missing");
+    let api_id = std::env::var("TG_ID")
+        .expect("TG_ID missing")
+        .parse::<i32>()?;
+    let api_hash = std::env::var("TG_HASH").expect("TG_HASH missing");
+    let chat_name = env::args().nth(1).expect("chat name missing");
 
     println!("Connecting to Telegram...");
     let client = Client::connect(Config {
@@ -79,10 +81,7 @@ async fn async_main() -> Result<()> {
         match client.session().save_to_file(SESSION_FILE) {
             Ok(_) => {}
             Err(e) => {
-                println!(
-                    "NOTE: failed to save the session, will sign out when done: {}",
-                    e
-                );
+                println!("NOTE: failed to save the session, will sign out when done: {e}");
                 sign_out = true;
             }
         }
@@ -90,7 +89,7 @@ async fn async_main() -> Result<()> {
 
     let maybe_chat = client.resolve_username(chat_name.as_str()).await?;
 
-    let chat = maybe_chat.unwrap_or_else(|| panic!("Chat {} could not be found", chat_name));
+    let chat = maybe_chat.unwrap_or_else(|| panic!("Chat {chat_name} could not be found"));
 
     let mut messages = client.iter_messages(&chat);
 
@@ -103,7 +102,7 @@ async fn async_main() -> Result<()> {
     let mut counter = 0;
 
     while let Some(msg) = messages.next().await? {
-        counter = counter + 1;
+        counter += 1;
         println!("Message {}:{}", msg.id(), msg.text());
         if let Some(media) = msg.media() {
             let dest = format!(
@@ -118,7 +117,7 @@ async fn async_main() -> Result<()> {
         }
     }
 
-    println!("Downloaded {} messages", counter);
+    println!("Downloaded {counter} messages");
 
     if sign_out {
         // TODO revisit examples and get rid of "handle references" (also, this panics)
@@ -147,12 +146,12 @@ fn get_file_extension(media: &Media) -> String {
 }
 
 fn get_mime_extension(mime_type: Option<&str>) -> String {
-    return mime_type
+    mime_type
         .map(|m| {
             let mime: Mime = m.parse().unwrap();
-            format!(".{}", mime.subtype().to_string())
+            format!(".{}", mime.subtype())
         })
-        .unwrap_or(String::new());
+        .unwrap_or_default()
 }
 
 fn prompt(message: &str) -> Result<String> {

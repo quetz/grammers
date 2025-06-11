@@ -14,7 +14,9 @@ use crate::rustifier;
 use crate::{ignore_type, Config};
 use grammers_tl_parser::tl::{Definition, ParameterType, Type};
 use std::collections::HashSet;
+use std::fs::File;
 use std::io::{self, Write};
+use std::path::Path;
 
 /// Types that implement Copy from builtin_type
 const COPY_TYPES: [&str; 7] = ["bool", "f64", "i32", "i64", "u32", "[u8; 16]", "[u8; 32]"];
@@ -200,7 +202,7 @@ fn write_serializable<W: Write>(
         indent
     )?;
 
-    writeln!(file, "{}        use crate::Identifiable;", indent)?;
+    // writeln!(file, "{}        use crate::Identifiable;", indent)?;
     writeln!(file, "{}        match self {{", indent)?;
     for d in metadata.defs_with_type(ty) {
         writeln!(
@@ -257,7 +259,7 @@ fn write_deserializable<W: Write>(
         "{}    fn deserialize(buf: crate::deserialize::Buffer) -> crate::deserialize::Result<Self> {{",
         indent
     )?;
-    writeln!(file, "{}        use crate::Identifiable;", indent)?;
+    //writeln!(file, "{}        use crate::Identifiable;", indent)?;
     writeln!(file, "{}        let id = u32::deserialize(buf)?;", indent)?;
     writeln!(file, "{}        Ok(match id {{", indent)?;
     for d in metadata.defs_with_type(ty) {
@@ -369,24 +371,26 @@ fn write_definition<W: Write>(
 }
 
 /// Write the entire module dedicated to enums.
-pub(crate) fn write_enums_mod<W: Write>(
-    mut file: &mut W,
+pub(crate) fn write_enums_mod(
+    dst_dir: impl AsRef<Path>,
     definitions: &[Definition],
     metadata: &Metadata,
     config: &Config,
 ) -> io::Result<()> {
+    let _ = std::fs::create_dir(dst_dir.as_ref());
+
+    let mut mod_file = File::create(dst_dir.as_ref().join("mod.rs"))?;
     // Begin outermost mod
     write!(
-        file,
+        mod_file,
         "\
-         /// This module contains all of the boxed types, each\n\
-         /// represented by a `enum`. All of them implement\n\
-         /// [`Serializable`] and [`Deserializable`].\n\
-         ///\n\
-         /// [`Serializable`]: /grammers_tl_types/trait.Serializable.html\n\
-         /// [`Deserializable`]: /grammers_tl_types/trait.Deserializable.html\n\
-         #[allow(clippy::large_enum_variant)]\n\
-         pub mod enums {{\n\
+         //! This module contains all of the boxed types, each\n\
+         //! represented by a `enum`. All of them implement\n\
+         //! [`Serializable`] and [`Deserializable`].\n\
+         //!\n\
+         //! [`Serializable`]: /grammers_tl_types/trait.Serializable.html\n\
+         //! [`Deserializable`]: /grammers_tl_types/trait.Deserializable.html\n\
+         use crate::Identifiable;\n\
          "
     )?;
 
@@ -394,25 +398,23 @@ pub(crate) fn write_enums_mod<W: Write>(
     let mut sorted_keys: Vec<&Option<String>> = grouped.keys().collect();
     sorted_keys.sort();
     for key in sorted_keys.into_iter() {
-        // Begin possibly inner mod
-        let indent = if let Some(ns) = key {
-            writeln!(file, "    #[allow(clippy::large_enum_variant)]")?;
-            writeln!(file, "    pub mod {} {{", ns)?;
-            "        "
+        let file = if let Some(key) = key {
+            write!(mod_file, "pub mod {};", key)?;
+            &mut File::create(dst_dir.as_ref().join(format!("{}.rs", key)))?
         } else {
-            "    "
+            &mut mod_file
         };
 
-        for ty in grouped[key].iter().filter(|ty| !ignore_type(ty)) {
-            write_definition(&mut file, indent, ty, metadata, config)?;
+        // Begin possibly inner mod
+        if key.is_some() {
+            writeln!(file, "#![allow(clippy::large_enum_variant)]")?;
+            writeln!(file, "use crate::Identifiable;")?;
         }
 
-        // End possibly inner mod
-        if key.is_some() {
-            writeln!(file, "    }}")?;
+        for ty in grouped[key].iter().filter(|ty| !ignore_type(ty)) {
+            write_definition(file, "", ty, metadata, config)?;
         }
     }
 
-    // End outermost mod
-    writeln!(file, "}}")
+    Ok(())
 }

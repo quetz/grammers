@@ -41,6 +41,13 @@ use std::mem;
 use std::time::{Duration, Instant};
 use tl::enums::InputChannel;
 
+#[derive(Default)]
+pub struct UpdateResult {
+    pub updates: Vec<tl::enums::Update>,
+    pub users: Vec<tl::enums::User>,
+    pub chats: Vec<tl::enums::Chat>,
+}
+
 fn next_updates_deadline() -> Instant {
     Instant::now() + defs::NO_UPDATES_TIMEOUT
 }
@@ -211,7 +218,7 @@ impl MessageBox {
             return;
         }
         for entry in entries {
-            if let Some(state) = self.map.get_mut(&entry) {
+            if let Some(state) = self.map.get_mut(entry) {
                 state.deadline = deadline;
                 debug!("reset deadline {:?} for {:?}", deadline, entry);
             } else {
@@ -400,14 +407,7 @@ impl MessageBox {
         &mut self,
         updates: tl::enums::Updates,
         chat_hashes: &ChatHashCache,
-    ) -> Result<
-        (
-            Vec<tl::enums::Update>,
-            Vec<tl::enums::User>,
-            Vec<tl::enums::Chat>,
-        ),
-        Gap,
-    > {
+    ) -> Result<UpdateResult, Gap> {
         trace!("processing updates: {:?}", updates);
         // Top level, when handling received `updates` and `updatesCombined`.
         // `updatesCombined` groups all the fields we care about, which is why we use it.
@@ -442,7 +442,11 @@ impl MessageBox {
                         "skipping updates that were already handled at seq = {}",
                         self.seq
                     );
-                    return Ok((Vec::new(), users, chats));
+                    return Ok(UpdateResult {
+                        updates: Vec::new(),
+                        users,
+                        chats,
+                    });
                 }
                 Ordering::Less => {
                     debug!(
@@ -538,7 +542,11 @@ impl MessageBox {
             }
         }
 
-        Ok((result, users, chats))
+        Ok(UpdateResult {
+            updates: result,
+            users,
+            chats,
+        })
     }
 
     /// Tries to apply the input update if its `PtsInfo` follows the correct order.
@@ -773,7 +781,11 @@ impl MessageBox {
 
         // It is possible that the result from `GetDifference` includes users with `min = true`.
         // TODO in that case, we will have to resort to getUsers.
-        let (mut result_updates, users, chats) = self
+        let UpdateResult {
+            updates: mut result_updates,
+            users,
+            chats,
+        } = self
             .process_updates(us, chat_hashes)
             .expect("gap is detected while applying difference");
 
@@ -947,7 +959,11 @@ impl MessageBox {
                     date: NO_DATE,
                     seq: NO_SEQ,
                 });
-                let (mut result_updates, users, chats) = self
+                let UpdateResult {
+                    updates: mut result_updates,
+                    users,
+                    chats,
+                } = self
                     .process_updates(us, chat_hashes)
                     .expect("gap is detected while applying channel difference");
 

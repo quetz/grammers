@@ -8,7 +8,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-use crate::errors::{ParamParseError, ParseError};
+use crate::errors::{ParamParseError, ParseErrorKind};
 use crate::tl::{Category, Flag, Parameter, ParameterType, Type};
 use crate::utils::infer_id;
 
@@ -69,7 +69,7 @@ impl fmt::Display for Definition {
 }
 
 impl FromStr for Definition {
-    type Err = ParseError;
+    type Err = ParseErrorKind;
 
     /// Parses a [Type Language] definition.
     ///
@@ -84,7 +84,7 @@ impl FromStr for Definition {
     /// [Type Language]: https://core.telegram.org/mtproto/TL
     fn from_str(definition: &str) -> Result<Self, Self::Err> {
         if definition.trim().is_empty() {
-            return Err(ParseError::Empty);
+            return Err(ParseErrorKind::Empty);
         }
 
         // Parse `(left = ty)`
@@ -94,11 +94,11 @@ impl FromStr for Definition {
             if let Some(t) = it.next() {
                 (ls.trim(), t.trim())
             } else {
-                return Err(ParseError::MissingType);
+                return Err(ParseErrorKind::MissingType);
             }
         };
 
-        let mut ty = Type::from_str(ty).map_err(|_| ParseError::MissingType)?;
+        let mut ty = Type::from_str(ty).map_err(|_| ParseErrorKind::MissingType)?;
 
         // Parse `name middle`
         let (name, middle) = {
@@ -119,7 +119,7 @@ impl FromStr for Definition {
         // Parse `ns1.ns2.name`
         let mut namespace: Vec<String> = name.split('.').map(|part| part.to_string()).collect();
         if namespace.iter().any(|part| part.is_empty()) {
-            return Err(ParseError::MissingName);
+            return Err(ParseErrorKind::MissingName);
         }
 
         // Safe to unwrap because split() will always yield at least one.
@@ -127,7 +127,7 @@ impl FromStr for Definition {
 
         // Parse `id`
         let id = match id {
-            Some(v) => u32::from_str_radix(v.trim(), 16).map_err(ParseError::InvalidId)?,
+            Some(v) => u32::from_str_radix(v.trim(), 16).map_err(ParseErrorKind::InvalidId)?,
             None => infer_id(definition),
         };
 
@@ -171,7 +171,9 @@ impl FromStr for Definition {
                     ..
                 }) if generic_ref => {
                     if generic_ref && !type_defs.contains(name) {
-                        Some(Err(ParseError::InvalidParam(ParamParseError::MissingDef)))
+                        Some(Err(ParseErrorKind::InvalidParam(
+                            ParamParseError::MissingDef,
+                        )))
                     } else {
                         Some(Ok(p.unwrap()))
                     }
@@ -187,7 +189,9 @@ impl FromStr for Definition {
                     ..
                 }) => {
                     if !flag_defs.contains(name) {
-                        Some(Err(ParseError::InvalidParam(ParamParseError::MissingDef)))
+                        Some(Err(ParseErrorKind::InvalidParam(
+                            ParamParseError::MissingDef,
+                        )))
                     } else {
                         Some(Ok(p.unwrap()))
                     }
@@ -197,12 +201,12 @@ impl FromStr for Definition {
                 Ok(p) => Some(Ok(p)),
 
                 // Unimplenented parameters are unimplemented definitions.
-                Err(ParamParseError::NotImplemented) => Some(Err(ParseError::NotImplemented)),
+                Err(ParamParseError::NotImplemented) => Some(Err(ParseErrorKind::NotImplemented)),
 
                 // Any error should just become a `ParseError`
-                Err(x) => Some(Err(ParseError::InvalidParam(x))),
+                Err(x) => Some(Err(ParseErrorKind::InvalidParam(x))),
             })
-            .collect::<Result<_, ParseError>>()?;
+            .collect::<Result<_, ParseErrorKind>>()?;
 
         // The type lacks `!` so we determine if it's a generic one based
         // on whether its name is known in a previous parameter type def.
@@ -243,7 +247,7 @@ mod tests {
 
     #[test]
     fn parse_empty_def() {
-        assert_eq!(Definition::from_str(""), Err(ParseError::Empty));
+        assert_eq!(Definition::from_str(""), Err(ParseErrorKind::Empty));
     }
 
     #[test]
@@ -253,34 +257,43 @@ mod tests {
         let bad_empty = u32::from_str_radix("", 16).unwrap_err();
         assert_eq!(
             Definition::from_str("foo#bar = baz"),
-            Err(ParseError::InvalidId(bad))
+            Err(ParseErrorKind::InvalidId(bad))
         );
         assert_eq!(
             Definition::from_str("foo#? = baz"),
-            Err(ParseError::InvalidId(bad_q))
+            Err(ParseErrorKind::InvalidId(bad_q))
         );
         assert_eq!(
             Definition::from_str("foo# = baz"),
-            Err(ParseError::InvalidId(bad_empty))
+            Err(ParseErrorKind::InvalidId(bad_empty))
         );
     }
 
     #[test]
     fn parse_no_name() {
-        assert_eq!(Definition::from_str(" = foo"), Err(ParseError::MissingName));
+        assert_eq!(
+            Definition::from_str(" = foo"),
+            Err(ParseErrorKind::MissingName)
+        );
     }
 
     #[test]
     fn parse_no_type() {
-        assert_eq!(Definition::from_str("foo"), Err(ParseError::MissingType));
-        assert_eq!(Definition::from_str("foo = "), Err(ParseError::MissingType));
+        assert_eq!(
+            Definition::from_str("foo"),
+            Err(ParseErrorKind::MissingType)
+        );
+        assert_eq!(
+            Definition::from_str("foo = "),
+            Err(ParseErrorKind::MissingType)
+        );
     }
 
     #[test]
     fn parse_unimplemented() {
         assert_eq!(
             Definition::from_str("int ? = Int"),
-            Err(ParseError::NotImplemented)
+            Err(ParseErrorKind::NotImplemented)
         );
     }
 
@@ -344,13 +357,10 @@ mod tests {
         assert_eq!(def.name, "a");
         assert_eq!(def.id, 1);
         assert_eq!(def.params.len(), 1);
-        assert!(match def.params[0].ty {
-            ParameterType::Normal {
+        assert!(matches!(def.params[0].ty, ParameterType::Normal {
                 ty: Type { generic_ref, .. },
                 ..
-            } if generic_ref => true,
-            _ => false,
-        });
+            } if generic_ref));
         assert_eq!(
             def.ty,
             Type {
@@ -446,13 +456,13 @@ mod tests {
         let def = "name param:!X = Type";
         assert_eq!(
             Definition::from_str(def),
-            Err(ParseError::InvalidParam(ParamParseError::MissingDef))
+            Err(ParseErrorKind::InvalidParam(ParamParseError::MissingDef))
         );
 
         let def = "name {X:Type} param:!Y = Type";
         assert_eq!(
             Definition::from_str(def),
-            Err(ParseError::InvalidParam(ParamParseError::MissingDef))
+            Err(ParseErrorKind::InvalidParam(ParamParseError::MissingDef))
         );
     }
 
@@ -461,13 +471,13 @@ mod tests {
         let def = "name param:flags.0?true = Type";
         assert_eq!(
             Definition::from_str(def),
-            Err(ParseError::InvalidParam(ParamParseError::MissingDef))
+            Err(ParseErrorKind::InvalidParam(ParamParseError::MissingDef))
         );
 
         let def = "name foo:# param:flags.0?true = Type";
         assert_eq!(
             Definition::from_str(def),
-            Err(ParseError::InvalidParam(ParamParseError::MissingDef))
+            Err(ParseErrorKind::InvalidParam(ParamParseError::MissingDef))
         );
     }
 

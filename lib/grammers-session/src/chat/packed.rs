@@ -88,12 +88,15 @@ impl PackedChat {
         })
     }
 
-    /// Deserialize the hexadecimal string into a packed chat.
-    pub fn from_hex(hex: &str) -> Result<Self, ()> {
+    /// Deserialize a hexadecimal string into a [`PackedChat`].
+    ///
+    /// Returns an error if the hex string is invalid or if the resulting bytes don't represent a valid packed chat.
+    #[allow(clippy::result_unit_err)]
+    pub fn from_hex(hex: &str) -> Result<Self, std::io::Error> {
         if let Some(bytes) = hex::opt_from_hex(hex) {
-            Self::from_bytes(&bytes)
+            Self::from_bytes(&bytes).map_err(|_| std::io::Error::other("Invalid packed chat bytes"))
         } else {
-            Err(())
+            Err(std::io::Error::other("Invalid hexadecimal string"))
         }
     }
 
@@ -239,14 +242,14 @@ mod tests {
                 id: 123,
                 access_hash: Some(456789),
             };
-            assert_eq!(PackedChat::from_hex(&pc.to_hex()), Ok(pc));
+            assert_eq!(PackedChat::from_hex(&pc.to_hex()).unwrap(), pc);
 
             let pc = PackedChat {
                 ty,
                 id: 987,
                 access_hash: None,
             };
-            assert_eq!(PackedChat::from_hex(&pc.to_hex()), Ok(pc));
+            assert_eq!(PackedChat::from_hex(&pc.to_hex()).unwrap(), pc);
         }
     }
 }

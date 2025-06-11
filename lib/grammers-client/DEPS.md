@@ -67,7 +67,7 @@ Used for defining date types (for example, accessing the date of when a message 
 
 Used by the examples to showcase how one may configure logging for more information.
 
-## toml
+## test-helpers
 
 Used to test that this file lists all dependencies from `Cargo.toml`.
 

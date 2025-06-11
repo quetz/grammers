@@ -12,10 +12,26 @@
 use std::num::ParseIntError;
 
 /// The error type for the parsing operation of [`Definition`]s.
+#[derive(Debug)]
+pub struct ParseError {
+    pub kind: ParseErrorKind,
+    pub definition: String,
+}
+
+impl ParseError {
+    pub fn new(kind: ParseErrorKind, def: impl AsRef<str>) -> ParseError {
+        ParseError {
+            kind,
+            definition: def.as_ref().to_owned(),
+        }
+    }
+}
+
+/// The error kinds for the parsing operation of [`Definition`]s.
 ///
 /// [`Definition`]: tl/struct.Definition.html
 #[derive(Debug, PartialEq)]
-pub enum ParseError {
+pub enum ParseErrorKind {
     /// The definition is empty.
     Empty,
 

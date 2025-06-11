@@ -7,7 +7,6 @@
 // except according to those terms.
 use super::{Deserialization, DeserializeError, Mtp, RequestError};
 use crate::{manual_tl, MsgId};
-use getrandom::getrandom;
 use grammers_crypto::{decrypt_data_v2, encrypt_data_v2, AuthKey, RingBuffer};
 use grammers_tl_types::{self as tl, Cursor, Deserializable, Identifiable, Serializable};
 use log::{debug, info};
@@ -134,7 +133,7 @@ impl Builder {
             start_salt_time: None,
             client_id: {
                 let mut buffer = [0u8; 8];
-                getrandom(&mut buffer).expect("failed to generate a secure client_id");
+                getrandom::fill(&mut buffer).expect("failed to generate a secure client_id");
                 i64::from_le_bytes(buffer)
             },
             sequence: 0,
@@ -278,7 +277,7 @@ impl Encrypted {
         self.client_id.serialize(&mut header); // 8 bytes
 
         // Append message body
-        buffer.extend(msg.into_iter());
+        buffer.extend(msg);
 
         Some(id)
     }
@@ -315,8 +314,7 @@ impl Encrypted {
             tl::types::MsgDetailedInfo::CONSTRUCTOR_ID
             | tl::types::MsgNewDetailedInfo::CONSTRUCTOR_ID => self.handle_detailed_info(message),
             // Explicit Request to Re-Send Messages & Explicit Request to Re-Send Answers
-            tl::types::MsgResendReq::CONSTRUCTOR_ID
-            | tl::types::MsgResendAnsReq::CONSTRUCTOR_ID => self.handle_msg_resend(message),
+            tl::types::MsgResendReq::CONSTRUCTOR_ID => self.handle_msg_resend(message),
 
             // Request for several future salts
             tl::types::FutureSalt::CONSTRUCTOR_ID => self.handle_future_salt(message),
@@ -498,7 +496,7 @@ impl Encrypted {
     fn store_own_updates(&mut self, body: &[u8]) {
         match u32::from_bytes(body) {
             Ok(body_id) => {
-                if UPDATE_IDS.iter().any(|&id| body_id == id) {
+                if UPDATE_IDS.contains(&body_id) {
                     // TODO somehow signal that this updates is our own, to avoid getting into nasty loops
                     self.updates.push(body.to_vec());
                 }
@@ -1214,7 +1212,7 @@ impl Mtp for Encrypted {
     fn reset(&mut self) {
         self.client_id = {
             let mut buffer = [0u8; 8];
-            getrandom(&mut buffer).expect("failed to generate a secure client_id");
+            getrandom::fill(&mut buffer).expect("failed to generate a secure client_id");
             i64::from_le_bytes(buffer)
         };
         self.sequence = 0;
@@ -1294,11 +1292,11 @@ mod tests {
         let mut buffer = RingBuffer::with_capacity(0, 0);
         mtproto.pop_finalized_plain(&mut buffer);
         let buf = &buffer[MESSAGE_PREFIX_LEN..];
-        ensure_buffer_is_message(&buf, REQUEST, 1);
+        ensure_buffer_is_message(buf, REQUEST, 1);
         let mut buffer = RingBuffer::with_capacity(0, 0);
         mtproto.pop_finalized_plain(&mut buffer);
         let buf = &buffer[MESSAGE_PREFIX_LEN..];
-        ensure_buffer_is_message(&buf, REQUEST_B, 3);
+        ensure_buffer_is_message(buf, REQUEST_B, 3);
     }
 
     #[test]
