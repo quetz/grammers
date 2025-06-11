@@ -98,7 +98,7 @@ mod tests {
                 ..
             }))
         ));
-        assert!(matches!(it.next(), None));
+        assert!(it.next().is_none());
     }
 
     #[test]
@@ -116,6 +116,6 @@ mod tests {
         assert_eq!(it.next().unwrap().unwrap().id, 1);
         assert!(it.next().unwrap().is_err());
         assert_eq!(it.next().unwrap().unwrap().id, 3);
-        assert!(matches!(it.next(), None));
+        assert!(it.next().is_none());
     }
 }

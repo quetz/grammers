@@ -382,10 +382,7 @@ impl Connection {
 
         let mut exp_backoff = 0;
 
-        log::warn!("INVOKEEEEE");
-
         let mut rx = { self.request_tx.read().unwrap().enqueue(request) };
-        log::warn!("ENQUEUED");
         loop {
             match rx.try_recv() {
                 Ok(response) => match response {
@@ -417,11 +414,9 @@ impl Connection {
                     Err(e) => break Err(e),
                 },
                 Err(TryRecvError::Empty) => {
-                    log::warn!("try_recv -> ERR EMPTY");
                     on_updates(self.step().await?);
                 }
                 Err(TryRecvError::Closed) => {
-                    log::warn!("try_recv -> ERR CLOSED");
                     panic!("request channel dropped before receiving a result")
                 }
             }
@@ -430,14 +425,10 @@ impl Connection {
 
     async fn step(&self) -> Result<Vec<tl::enums::Updates>, sender::ReadError> {
         let ticket_number = self.step_counter.load(Ordering::SeqCst);
-        if self.sender.try_lock().is_err() {
-            log::warn!("step: LOCKED!");
-        } else {
-            log::warn!("step: OK, NOT LOCKED!");
-        }
-        //println!("Custom backtrace: {}", std::backtrace::Backtrace::capture());
+
         let mut sender = self.sender.lock().await;
-        let res = match self.step_counter.compare_exchange(
+
+        match self.step_counter.compare_exchange(
             ticket_number,
             // As long as the counter's modulo is larger than the amount of concurrent tasks, we're fine.
             ticket_number.wrapping_add(1),
@@ -446,8 +437,6 @@ impl Connection {
         ) {
             Ok(_) => sender.step().await, // We're the one to drive IO.
             Err(_) => Ok(Vec::new()),     // A different task drove IO.
-        };
-        log::warn!("step: RETURNING");
-        res
+        }
     }
 }

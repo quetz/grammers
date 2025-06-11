@@ -9,11 +9,11 @@ mod errors;
 pub mod retry;
 
 pub use errors::{AuthorizationError, InvocationError, ReadError};
-use futures_util::future::{pending, select, Either};
+use futures_util::future::{Either, pending, select};
 use grammers_crypto::RingBuffer;
 use grammers_mtproto::mtp::{self, Deserialization, Mtp};
 use grammers_mtproto::transport::{self, Transport};
-use grammers_mtproto::{authentication, MsgId};
+use grammers_mtproto::{MsgId, authentication};
 use grammers_tl_types::{self as tl, Deserializable, RemoteCall};
 use log::{debug, info, trace, warn};
 use std::io;
@@ -24,20 +24,20 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::SystemTime;
 use tl::Serializable;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::tcp::{ReadHalf, WriteHalf};
 use tokio::net::TcpStream;
+use tokio::net::tcp::{ReadHalf, WriteHalf};
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::error::TryRecvError;
-use tokio::time::{sleep_until, Duration, Instant};
+use tokio::time::{Duration, Instant, sleep_until};
 
 #[cfg(feature = "proxy")]
 use {
     std::io::ErrorKind,
     std::net::{IpAddr, SocketAddr},
     tokio_socks::tcp::Socks5Stream,
-    trust_dns_resolver::config::{ResolverConfig, ResolverOpts},
     trust_dns_resolver::AsyncResolver,
+    trust_dns_resolver::config::{ResolverConfig, ResolverOpts},
     url::Host,
 };
 
@@ -302,8 +302,6 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
             Write(io::Result<usize>),
         }
 
-        log::warn!("SENDER step");
-
         let mut attempts = 0u8;
         loop {
             if attempts > 5 {
@@ -338,17 +336,15 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
             );
 
             let sel = {
-                log::warn!("next ping is at {:?}", self.next_ping);
                 let sleep = Box::pin(sleep_until(self.next_ping));
                 let recv_req = Box::pin(self.request_rx.recv());
                 let recv_data = Box::pin(reader.read(&mut self.read_buffer[self.read_index..]));
                 let send_data = pin!(async {
-                    let r = if self.write_buffer.is_empty() {
+                    if self.write_buffer.is_empty() {
                         pending().await
                     } else {
                         writer.write(&self.write_buffer[self.write_index..]).await
-                    };
-                    r
+                    }
                 });
                 let lhs = select(sleep, recv_req);
                 let rhs = select(recv_data, send_data);
